@@ -35,6 +35,7 @@ import color;
 import transform;
 import paint;
 import path;
+import text;
 
 // --- instances: src/shaders/shape.glsl ------------------------------------------
 
@@ -43,6 +44,7 @@ let KIND_ELLIPSE: u32 = 1;
 let KIND_PIE: u32 = 2;
 let KIND_ARC: u32 = 3;
 let KIND_ARC_BUTT: u32 = 4;
+let KIND_GLYPH: u32 = 5;
 
 let FLAG_STROKE: u32 = 1;
 // A rectangle's sides drawn hard (shape.glsl): where pieces meet.
@@ -280,6 +282,7 @@ fn flush_batches() {
         upload(renderer.paints, renderer.paint_bytes, gfx::BUFFER_STORAGE, bytes_of(paints));
         upload_ramps();
     }
+    let atlas = upload_atlas();
     let info = gfx::texture_info(state.target);
     var pass = gfx::PassDesc { clear_color: state.clear,
                                color_value: premultiplied(state.clear_color), .. };
@@ -290,6 +293,8 @@ fn flush_batches() {
         if b.kind == BATCH_SHAPES {
             gfx::bind(renderer.pipelines[b.blend]);
             gfx::bind_storage_buffer(gfx::VERTEX, 0, renderer.instances);
+            gfx::bind_texture(gfx::FRAGMENT, 2, if atlas.id != 0 { atlas } else { renderer.white },
+                              renderer.samplers[2]);
         } else {
             gfx::bind(renderer.mesh_pipelines[b.blend]);
             gfx::bind_vertex_buffer(renderer.vertices);

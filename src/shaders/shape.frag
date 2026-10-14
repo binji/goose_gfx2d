@@ -17,7 +17,13 @@ layout(location = 7) flat in uint v_paint;
 
 layout(set = 2, binding = 0) uniform sampler2D ramp;
 layout(set = 2, binding = 1) uniform sampler2D image;
-layout(std430, set = 2, binding = 2) readonly buffer Paints { Paint paints[]; };
+layout(set = 2, binding = 2) uniform sampler2D glyphs;
+layout(std430, set = 2, binding = 3) readonly buffer Paints { Paint paints[]; };
+
+// text.goose's glyph atlas: a value of GLYPH_ON_EDGE on the outline, more
+// inside, GLYPH_DIST_SCALE per pixel of distance.
+const float GLYPH_ON_EDGE = 128.0 / 255.0;
+const float GLYPH_DIST_SCALE = 128.0 / 6.0 / 255.0;
 layout(set = 3, binding = 0) uniform Blend { uint blend; };
 
 layout(location = 0) out vec4 result;
@@ -80,6 +86,13 @@ void main() {
         d = sd_pie(p, sc, v_geom.x);
     } else if (v_kind == KIND_ARC) {
         d = sd_arc(p, sc, v_geom.x, v_geom.w);
+    } else if (v_kind == KIND_GLYPH) {
+        // Kept to the glyph's own texels: the quad reaches past them, by
+        // more atlas pixels the smaller the text.
+        vec2 size = vec2(textureSize(glyphs, 0));
+        vec2 t = clamp(p + v_geom.xy, vec2(0.5), v_radii.zw - 0.5);
+        float value = textureLod(glyphs, (v_radii.xy + t) / size, 0.0).r;
+        d = (GLYPH_ON_EDGE - value) / GLYPH_DIST_SCALE;
     } else {
         d = max(abs(length(p) - v_geom.x) - v_geom.w, sd_pie(p, sc, v_geom.x + v_geom.w + 1.0));
     }

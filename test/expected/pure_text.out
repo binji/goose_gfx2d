@@ -1,0 +1,19 @@
+built-in: valid true, metrics gfx2d::FontMetrics { 2048, 1984, -494, 0 }
+at 32px: ascent 31.0, descent -7.72, line height 38.72
+decoded: [97, 233, 8212, 128512]
+invalid: [97, 65533, 40, 65533]
+glyphs: A true, é true, 中 false
+kerning AV: true, AA: 30
+Hello at 32: 77.13 x 38.72; two lines: 77.44 high
+twice the size, twice as wide: true
+AV narrower than A and V: true
+letter spacing adds 4 x 2: 8.0
+empty: vec2<f32> { 0.0, 38.71875 }
+wrapped: 4 lines: ["the quick", "brown fox", "jumps over", "the lazy dog"]
+each fits: true; measured height 77.44 = 4 x 19.36
+a word wider than the wrap: line lengths 1 20 1 
+fallback: true, resolved in itself, true
+missing everywhere: .notdef of the first, true
+no file: false 0
+not a font: 0, count 0
+released: false, fallback cleared true

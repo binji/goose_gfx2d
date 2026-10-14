@@ -53,11 +53,11 @@ goose_gfx2d/
   transform.goose      Affine, Rect, fit (no GPU, no C)
   path.goose           paths, flattening, stroking, tessellation (no GPU, no C)
   text.goose           fonts, measuring, layout, drawing
-  gfx2d.build          sidecar, from phase 4: cmake_target = "goose_gfx2d_package"; main_thread_only
-  CMakeLists.txt       from phase 4: builds the text layer with stb_truetype and stb_rect_pack
+  gfx2d.build          sidecar: cmake_target = "goose_gfx2d_package"; main_thread_only
+  CMakeLists.txt       builds the text layer with stb_truetype
   src/
     shaders/           shape.glsl/.vert/.frag; later mesh.*, paint.glsl, blit.frag (embed_shader by file)
-    text/              text_api.h (GS_GFX2D_TEXT_API), text_font.c, text_atlas.c, text_stb.c
+    text/              text_api.h (GS_GFX2D_TEXT_API), text_font.c
   docs/                design.md (this), gfx2d.md, color.md, path.md, text.md
   examples/            small programs, each a root file
   test/
@@ -68,7 +68,8 @@ goose_gfx2d/
     pure/              color, path and tessellation tests that need no GPU
     window/            gfx2d_showcase.goose and run_window_test.py
   third_party/stb      shallow submodule
-  third_party/fonts/   the default font: a Latin subset of Inter Regular, with its OFL.txt
+  third_party/fonts/   the default font: a Latin subset of Inter Regular, its OFL.txt, and
+                       make_subset.sh and unwrap_extensions.py, which made it
   README.md  LICENSE
 ```
 
@@ -705,56 +706,66 @@ flicker that sub-pixel strokes cause.
 
 ## Text (`text.goose`, `src/text/`)
 
-* **Fonts:** `load_font(path)` and `font_from_memory(bytes)` load any
-  TrueType or OpenType font, and `set_default_font(font)` makes one the
-  default for calls that don't name a font. A font is a handle, and size is
-  a parameter at draw time, not a property of the font.
-* **The built-in font** is [Inter](https://github.com/rsms/inter) Regular
-  (SIL Open Font License 1.1), which `default_font()` returns. It is
-  vendored in `third_party/fonts/` together with its `OFL.txt`, subset with
-  fonttools' `pyftsubset` to these ranges:
-  * Basic Latin, Latin-1 Supplement and Latin Extended-A,
-  * General Punctuation,
-  * the common currency signs and arrows,
-  * `kern`/`GPOS` kerning.
+* **Fonts:**
+  * `load_font(path)` and `font_from_memory(bytes)` load any TrueType or
+    OpenType font, or one font of a collection.
+  * `set_default_font(font)` makes a font the default for calls that
+    don't name one.
+  * `add_fallback(font, other)` chains fonts for characters a font lacks.
+  * `release(font)` frees a font.
 
-  The subset is about 100 KB. `text.goose` includes it with Goose's
-  `embed_file`, which puts it in the program's static data, so the default
-  font needs no file at run time and no C build step of its own. A script
-  under `third_party/fonts/` records the exact command and the upstream
-  version, so the subset can be regenerated. The subset keeps the license
-  notice, and if the font declares a Reserved Font Name, the subset is
-  renamed as the OFL requires. Text in other scripts needs a font loaded
-  for it, added with `add_fallback`.
-* **Rendering uses SDF glyphs.** The C layer rasterizes each glyph once with
-  `stbtt_GetGlyphSDF` at a base size (around 48px, with an 8px spread) into
-  an R8 atlas page, and stb_rect_pack packs new glyphs as they are first
-  used. Each glyph is drawn as an instance of the shared shape pipeline, so
-  text can be scaled and rotated, uses the same paint (gradient text,
-  textured text), and offers `outline` and `glow` from the same distance
-  field at no extra cost. Very small text (under about 12px) benefits from
-  hinted bitmaps, so a `FontDesc { mode: BITMAP }` rasterizes coverage at
-  the exact pixel size instead.
+  A font is a handle, and size is a parameter at draw time, not a property
+  of the font.
+* **The built-in font** is [Inter](https://github.com/rsms/inter) 4.1
+  Regular (SIL Open Font License 1.1), which `default_font()` returns. It
+  is subset to Latin, Latin-1, Latin Extended-A, punctuation, currency
+  signs and arrows, keeping kerning and dropping hinting. The result is
+  48 KB, in `third_party/fonts/` with `OFL.txt`. `make_subset.sh` records
+  the upstream release, its hashes and the exact `pyftsubset` command. It
+  then unwraps the GPOS Extension lookups, since stb_truetype reads
+  kerning only from plain Pair Adjustment lookups, and most of Inter's is
+  in extensions. `text.goose` includes the font with `embed_file`, so the
+  default font needs no file at run time. The license names no Reserved
+  Font Name, so the subset keeps Inter's name.
+* **Rendering uses SDF glyphs.**
+  * The C layer rasterizes each glyph once with `stbtt_GetGlyphSDF`, at a
+    48 px em with a 6 px spread.
+  * `text.goose` packs the glyphs into a shelf-packed R8 atlas, 1024 px
+    wide and growing taller to 4096 px. The atlas starts over if it
+    fills, and only changed rows are uploaded.
+  * A glyph is an instance of the shape pipeline (`KIND_GLYPH`). Its
+    distance comes from the atlas instead of a formula and becomes
+    coverage the same way, so text scales, rotates and takes any paint
+    (gradient text, textured text, blend modes).
+  * `outline` draws the glyph's distance field as a stroke. Its width is
+    limited by the spread: about 6 px × size / 48.
+  * Under a translation-only transform, the baseline is snapped to whole
+    pixels.
+  * Text under about 12 px is readable but soft. A hinted-bitmap mode for
+    small sizes is follow-up work.
 * **Drawing and measuring:** `text(x, y, str, size, paint)`,
-  `text(pos, str, TextStyle)`, `measure(str, style) -> float2`,
-  `line_height`, `ascent`/`descent`, `glyph_positions(str, style, out)` (for
-  carets and selection), and `char_index_at(str, style, x)` for hit testing
-  inside text.
+  `text(x, y, str, TextStyle, paint)`, `measure_text(str, size | style) -> float2`,
+  `font_ascent`, `font_descent` and `font_line_height`.
 * **Layout:** `TextStyle { font, size, align (LEFT/CENTER/RIGHT), baseline
   (TOP/MIDDLE/ALPHABETIC/BOTTOM), line_spacing, letter_spacing, wrap_width,
-  overflow (CLIP/ELLIPSIS) }`. Text is decoded as UTF-8 and kerned from the
-  font's `kern`/`GPOS` tables through stb_truetype, and wrapping follows
-  spaces and explicit newlines.
-* **Fallback fonts:** `add_fallback(font, other)` handles glyphs a font
-  doesn't have, such as symbols and CJK. Each glyph comes from a single
-  font, and nothing is shaped.
+  outline }`. Text is decoded as UTF-8 (an invalid byte is U+FFFD on its
+  own) and kerned through stb_truetype. Lines break at newlines and, with
+  a wrap width, at the last space that fits. A word wider than the wrap
+  width gets a line of its own.
+* **No shaping.** Each character is one glyph, so scripts that need
+  shaping (Arabic, Devanagari) don't come out right. HarfBuzz behind the
+  same API is listed as later work.
 
-The C API (`src/text/text_api.h`, `GS_GFX2D_TEXT_API`) is small: load or
-unload a font, get metrics, get a glyph's metrics and kerning, rasterize a
-glyph (SDF or coverage) into a caller-supplied byte slice, and pack
-rectangles. Atlas pages are `gfx` textures that the Goose side creates and
-updates. The C side never sees `gfx` or SDL. `test/api_check.py` checks
-the header against `text.goose`, as goose_gfx's does.
+The C API (`src/text/text_api.h`, `GS_GFX2D_TEXT_API`) has nine functions:
+load, release and validity, the font count of a file, font metrics, glyph
+lookup, glyph metrics, kerning, and rasterizing a glyph's SDF into a
+caller's buffer. The C side never sees `gfx` or SDL. stb_truetype is
+compiled into it `static`, so a program that also links Nuklear's copy (in
+`ui`) has no clash. `test/api_check.py` checks the header against
+`text.goose`: the function names, the parameter counts, and the fields of
+the structs that cross. The built-in font is also why the package has a
+sidecar (`gfx2d.build`, CMake target `goose_gfx2d_package`), which the
+Goose compiler builds the first time a program uses the package.
 
 `ui` already has Nuklear's font atlas. `gfx2d` doesn't reuse it, because
 those glyphs are fixed-size bitmaps, and scalable, paintable text is one of
@@ -915,8 +926,10 @@ Ordered by value to typical users. The first group belongs in v1.
    fill rules, the fringe, the stroker with joins, caps and dashes,
    polygons and polylines, the mesh pipeline, and `examples/paths.goose`.
    Retained meshes and SVG path data are left for later.
-4. **Text**: the stb_truetype layer, the vendored Inter subset, SDF atlas,
-   measure and layout, and outline and glow.
+4. **Text** (done): the stb_truetype layer, the vendored Inter subset, the
+   SDF atlas, measuring and layout (alignment, baselines, wrapping,
+   kerning, fallbacks), outlines, the API check, and `examples/text.goose`.
+   Glow and a bitmap mode for small text are left for later.
 5. **Clip and layers**: rectangle and analytic clips, R8 mask clips,
    layers with group opacity and the shader-composited blend modes, blur
    and shadows, MSAA canvases.

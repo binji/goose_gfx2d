@@ -1,0 +1,8 @@
+// The gfx2d package's native part: the text layer under src/text/, one
+// CMake project (CMakeLists.txt beside this file) whose target
+// goose_gfx2d_package carries it. Its functions, and gfx's that the rest of
+// the package calls, run on the main thread only. Examples and tests are
+// programs of their own, not the package's.
+cmake_target = "goose_gfx2d_package";
+main_thread_only = true;
+exclude = ["examples", "test", "third_party"];

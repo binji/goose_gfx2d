@@ -25,7 +25,7 @@ const vec2 corners[6] = vec2[6](vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(1.0, 1.0
 void main() {
     Instance s = inst[base + uint(gl_VertexIndex) / 6u];
     vec2 extent;
-    if (s.kind == KIND_RECT || s.kind == KIND_ELLIPSE) {
+    if (s.kind == KIND_RECT || s.kind == KIND_ELLIPSE || s.kind == KIND_GLYPH) {
         extent = s.geom.xy;
     } else if (s.kind == KIND_PIE) {
         extent = vec2(s.geom.x);

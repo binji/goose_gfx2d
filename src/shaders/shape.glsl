@@ -12,6 +12,9 @@
 //   KIND_PIE      geom.x radius, geom.y half the angle it spans, about +y
 //   KIND_ARC      as a pie, and geom.w half the arc's width; round caps
 //   KIND_ARC_BUTT the same, with butt caps
+//   KIND_GLYPH    a glyph of the atlas: geom.xy half its size; radii its
+//                 place in the atlas, x, y, w, h, in the atlas's pixels,
+//                 which local space is in
 //
 // geom.z is a stroke's width, with FLAG_STROKE: the outline of the shape,
 // centered on its edge, rather than the shape.
@@ -40,6 +43,7 @@ const uint KIND_ELLIPSE = 1u;
 const uint KIND_PIE = 2u;
 const uint KIND_ARC = 3u;
 const uint KIND_ARC_BUTT = 4u;
+const uint KIND_GLYPH = 5u;
 
 const uint FLAG_STROKE = 1u;
 const uint FLAG_HARD_LEFT = 2u;

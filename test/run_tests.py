@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Runs gfx2d's tests: every program under test/pure/ and test/headless/,
-its output compared with test/expected/<dir>_<name>.out.
+"""Runs gfx2d's tests: test/api_check.py, and every program under
+test/pure/ and test/headless/, its output compared with
+test/expected/<dir>_<name>.out.
 
     python test/run_tests.py [--goose PATH] [--update] [name ...]
 
@@ -33,6 +34,16 @@ def main():
 
     env = dict(os.environ, GOOSE_GFX_HEADLESS="1")
     passed = failed = skipped = 0
+    if not args.names or any(n in "api_check" for n in args.names):
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "api_check.py")],
+                           capture_output=True, text=True)
+        if r.returncode == 0:
+            passed += 1
+            print("ok    api_check")
+        else:
+            failed += 1
+            print("FAIL  api_check")
+            print(r.stdout)
     for d in DIRS:
         for f in sorted(os.listdir(os.path.join(ROOT, d))):
             if not f.endswith(".goose"):
