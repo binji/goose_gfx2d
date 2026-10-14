@@ -16,6 +16,8 @@ layout(location = 2) flat out uint v_flags;
 layout(location = 3) flat out vec4 v_geom;
 layout(location = 4) flat out vec4 v_radii;
 layout(location = 5) flat out vec4 v_color;
+layout(location = 6) out vec2 v_user;
+layout(location = 7) flat out uint v_paint;
 
 const vec2 corners[6] = vec2[6](vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(1.0, 1.0),
                                 vec2(-1.0, -1.0), vec2(1.0, 1.0), vec2(-1.0, 1.0));
@@ -45,4 +47,6 @@ void main() {
     v_geom = s.geom;
     v_radii = s.radii;
     v_color = s.color;
+    v_user = s.lm.xy * p.x + s.lm.zw * p.y + s.lt;
+    v_paint = s.paint;
 }

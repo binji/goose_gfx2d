@@ -1,0 +1,13 @@
+kind 1, 2 stops, from vec2<f32> { 0.0, 0.0 } to vec2<f32> { 100.0, 0.0 }
+before, first, middle, last, after: 0,0,0,255 0,0,0,255 128,128,128,255 255,255,255,255 255,255,255,255
+srgb middle: 128,0,128,255
+linear middle: 188,0,188,255
+oklab middle: 140,83,162,255
+hard edge: 255,0,0,255 0,0,255,255
+to transparent: 255,0,0,128
+no stops: 0,0,0,0, one stop: 0,255,0,255 0,255,0,255
+stops kept: 16
+ramp: 1024 bytes, 255,0,0,255 .. 0,0,0,0; middle alpha 127 red 127
+same ramp: true false
+linear(): 1 2 opacity 0.5 blend 1
+radial: vec2<f32> { 10.0, 20.0 } focal vec2<f32> { 12.0, 22.0 } radius 30.0

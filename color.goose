@@ -46,16 +46,16 @@ let ORANGE = rgb(0xFFA500);
 fn rgb(hex: i64) -> Color {
     Color { ((hex >> 16) & 255) / 255.0, ((hex >> 8) & 255) / 255.0, (hex & 255) / 255.0, 1.0 }
 }
-fn rgba(hex: i64, a: f32) -> Color { with_alpha(rgb(hex), a) }
+fn rgba(hex: i64, a: f64) -> Color { with_alpha(rgb(hex), a) }
 // Channels as bytes, 0 to 255.
 fn rgba8(r: i64, g: i64, b: i64, a: i64) -> Color {
     Color { r / 255.0, g / 255.0, b / 255.0, a / 255.0 }
 }
 // Channels from 0 to 1.
-fn rgbf(r: f32, g: f32, b: f32) -> Color { Color { r, g, b, 1.0 } }
-fn rgbaf(r: f32, g: f32, b: f32, a: f32) -> Color { Color { r, g, b, a } }
-fn gray(v: f32) -> Color { Color { v, v, v, 1.0 } }
-fn gray(v: f32, a: f32) -> Color { Color { v, v, v, a } }
+fn rgbf(r: f64, g: f64, b: f64) -> Color { rgbaf(r, g, b, 1.0) }
+fn rgbaf(r: f64, g: f64, b: f64, a: f64) -> Color { Color { r as f32, g as f32, b as f32, a as f32 } }
+fn gray(v: f64) -> Color { rgbaf(v, v, v, 1.0) }
+fn gray(v: f64, a: f64) -> Color { rgbaf(v, v, v, a) }
 // 0xAARRGGBB.
 fn from_u32(argb: u32) -> Color {
     rgba8((argb >> 16) & 255, (argb >> 8) & 255, argb & 255, (argb >> 24) & 255)
@@ -124,16 +124,20 @@ fn from_linear(v: float4) -> Color {
 }
 
 fn fract(x: f32) -> f32 { x - floor(x) }
+fn fract(x: f64) -> f64 { x - floor(x) }
+
+// Scalars are f64 here, as in the rest of gfx2d, so that numbers of any
+// type pass; a Color holds f32.
 
 // HSV: hue in turns, saturation and value from 0 to 1.
-fn hsv(h: f32, s: f32, v: f32) -> Color { hsva(h, s, v, 1.0) }
-fn hsva(h: f32, s: f32, v: f32, a: f32) -> Color {
+fn hsv(h: f64, s: f64, v: f64) -> Color { hsva(h, s, v, 1.0) }
+fn hsva(h: f64, s: f64, v: f64, a: f64) -> Color {
     let k = fract(h) * 6.0;
-    fn channel(n: f32) -> f32 {
+    fn channel(n: f64) -> f64 {
         let t = (n + k) % 6.0;
         v - v * s * max(0.0, min(min(t, 4.0 - t), 1.0))
     }
-    Color { channel(5.0), channel(3.0), channel(1.0), a }
+    rgbaf(channel(5.0), channel(3.0), channel(1.0), a)
 }
 // { h, s, v, a }
 fn to_hsv(c: Color) -> float4 {
@@ -144,15 +148,15 @@ fn to_hsv(c: Color) -> float4 {
 }
 
 // HSL: hue in turns, saturation and lightness from 0 to 1.
-fn hsl(h: f32, s: f32, l: f32) -> Color { hsla(h, s, l, 1.0) }
-fn hsla(h: f32, s: f32, l: f32, a: f32) -> Color {
+fn hsl(h: f64, s: f64, l: f64) -> Color { hsla(h, s, l, 1.0) }
+fn hsla(h: f64, s: f64, l: f64, a: f64) -> Color {
     let k = fract(h) * 12.0;
     let m = s * min(l, 1.0 - l);
-    fn channel(n: f32) -> f32 {
+    fn channel(n: f64) -> f64 {
         let t = (n + k) % 12.0;
         l - m * max(-1.0, min(min(t - 3.0, 9.0 - t), 1.0))
     }
-    Color { channel(0.0), channel(8.0), channel(4.0), a }
+    rgbaf(channel(0.0), channel(8.0), channel(4.0), a)
 }
 // { h, s, l, a }
 fn to_hsl(c: Color) -> float4 {
@@ -200,10 +204,10 @@ fn from_oklab(lab: float4) -> Color {
 fn cbrt(x: f32) -> f32 { if x < 0.0 { -pow(-x, (1.0 / 3.0) as f32) } else { pow(x, (1.0 / 3.0) as f32) } }
 
 // OKLCh: OKLab's lightness, chroma (0 to about 0.37) and hue in turns.
-fn oklch(l: f32, c: f32, h: f32) -> Color { oklcha(l, c, h, 1.0) }
-fn oklcha(l: f32, c: f32, h: f32, a: f32) -> Color {
+fn oklch(l: f64, c: f64, h: f64) -> Color { oklcha(l, c, h, 1.0) }
+fn oklcha(l: f64, c: f64, h: f64, a: f64) -> Color {
     let angle = h * TAU;
-    from_oklab(float4 { l, c * cos(angle), c * sin(angle), a })
+    from_oklab(float4 { l as f32, (c * cos(angle)) as f32, (c * sin(angle)) as f32, a as f32 })
 }
 // { L, C, h, alpha }
 fn to_oklch(c: Color) -> float4 {
@@ -215,25 +219,25 @@ fn to_oklch(c: Color) -> float4 {
 
 // --- manipulation ----------------------------------------------------------------
 
-fn with_alpha(c: Color, a: f32) -> Color { Color { c.r, c.g, c.b, a } }
+fn with_alpha(c: Color, a: f64) -> Color { Color { c.r, c.g, c.b, a as f32 } }
 // Alpha multiplied by k.
-fn fade(c: Color, k: f32) -> Color { Color { c.r, c.g, c.b, c.a * k } }
+fn fade(c: Color, k: f64) -> Color { Color { c.r, c.g, c.b, (c.a * k) as f32 } }
 
 // OKLCh lightness moved by `amount` (lighten(c, 0.1) is a tenth of the way
 // from black to white), so equal amounts look like equal steps.
-fn lighten(c: Color, amount: f32) -> Color {
+fn lighten(c: Color, amount: f64) -> Color {
     let lch = to_oklch(c);
-    oklcha(saturate(lch.x + amount), lch.y, lch.z, lch.w)
+    oklcha(saturate((lch.x + amount) as f32), lch.y, lch.z, lch.w)
 }
-fn darken(c: Color, amount: f32) -> Color { lighten(c, -amount) }
+fn darken(c: Color, amount: f64) -> Color { lighten(c, -amount) }
 // OKLCh chroma multiplied by 1 + k, or 1 - k.
-fn saturate(c: Color, k: f32) -> Color {
+fn saturate(c: Color, k: f64) -> Color {
     let lch = to_oklch(c);
     oklcha(lch.x, max(0.0, lch.y * (1.0 + k)), lch.z, lch.w)
 }
-fn desaturate(c: Color, k: f32) -> Color { saturate(c, -k) }
+fn desaturate(c: Color, k: f64) -> Color { saturate(c, -k) }
 // The hue turned by `turns`, in OKLCh, keeping lightness and chroma.
-fn rotate_hue(c: Color, turns: f32) -> Color {
+fn rotate_hue(c: Color, turns: f64) -> Color {
     let lch = to_oklch(c);
     oklcha(lch.x, lch.y, lch.z + turns, lch.w)
 }
@@ -248,16 +252,16 @@ fn grayscale(c: Color) -> Color {
 // lightness and saturation, where sRGB's go dark and dull between
 // complementary colors. Mixed premultiplied, as CSS does, so a transparent
 // end takes on the other's color rather than darkening it.
-fn mix(a: Color, b: Color, t: f32) -> Color {
-    from_oklab(mix_premultiplied(to_oklab(a), to_oklab(b), t))
+fn mix(a: Color, b: Color, t: f64) -> Color {
+    from_oklab(mix_premultiplied(to_oklab(a), to_oklab(b), t as f32))
 }
 // In sRGB's encoding, as most 2D APIs and CSS gradients mix by default.
-fn mix_srgb(a: Color, b: Color, t: f32) -> Color {
-    from_float4(mix_premultiplied(to_float4(a), to_float4(b), t))
+fn mix_srgb(a: Color, b: Color, t: f64) -> Color {
+    from_float4(mix_premultiplied(to_float4(a), to_float4(b), t as f32))
 }
 // In linear light: physically, as light adds.
-fn mix_linear(a: Color, b: Color, t: f32) -> Color {
-    from_linear(mix_premultiplied(to_linear(a), to_linear(b), t))
+fn mix_linear(a: Color, b: Color, t: f64) -> Color {
+    from_linear(mix_premultiplied(to_linear(a), to_linear(b), t as f32))
 }
 // Two { x, y, z, alpha } mixed with x, y and z premultiplied by alpha, and
 // divided by it again after.
@@ -300,7 +304,7 @@ fn readable_on(background: Color) -> Color {
 // n colors of even lightness and chroma whose hues are a golden angle apart,
 // so any first few of them are far apart: for chart series and debug
 // colors. `seed` turns the first hue.
-fn palette(n: i64, seed: f32) -> Color[>..] {
+fn palette(n: i64, seed: f64) -> Color[>..] {
     var out: Color[>..] = [];
     for i in n { out.push(oklch(0.72, 0.13, seed + i * 0.381966)); }
     return out;

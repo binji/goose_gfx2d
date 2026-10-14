@@ -7,10 +7,12 @@ lines, polygons and Bézier paths), fills and strokes, solid, gradient and
 image paints with blend modes, 2D transforms, clipping, color math, and
 scalable SDF text. All of it is drawn through `gfx` and SDL3's GPU API.
 
-**Status: phase 1 of [the design](docs/design.md).** Solid-color shapes
+**Status: phases 1 and 2 of [the design](docs/design.md).** Shapes
 (rectangles, rounded rectangles, circles, ellipses, rings, pies, arcs and
-lines; filled or outlined), transforms and colors work. Gradients, images,
-paths and text come next.
+lines; filled or outlined), transforms, colors, and paints (linear,
+radial and conic gradients, images, sprites, nine-slices, image patterns,
+gradients blended with images, four blend modes) work. Paths, text,
+clipping and layers come next.
 
 ## Using it
 
@@ -33,7 +35,7 @@ fn main() {
 | | |
 |---|---|
 | `gfx2d.goose` | the entry: frames, the current transform, shapes, and the renderer |
-| `color.goose`, `transform.goose` | colors, and affine transforms and rectangles: plain Goose, no GPU |
+| `color.goose`, `transform.goose`, `paint.goose` | colors; affine transforms and rectangles; paints and gradient ramps: plain Goose, no GPU |
 | `src/shaders/` | the GLSL that `gfx2d.goose` embeds with `embed_shader` |
 | `examples/` | programs using the package, each a root file |
 | `test/run_tests.py` | runs `test/pure/` (no GPU) and `test/headless/` (renders into a texture and reads it back), comparing with `test/expected/` |

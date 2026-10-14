@@ -217,38 +217,54 @@ A paint describes how each covered pixel is colored. The shape decides
 which pixels are covered.
 
 ```goose
-enum Source {
-    Solid { color: Color },
-    Linear { p0: float2, p1: float2, ramp: Ramp },
-    Radial { center: float2, radius: f32, focal: float2, focal_radius: f32, ramp: Ramp },
-    Conic { center: float2, angle: f32, ramp: Ramp },
+struct Gradient {
+    kind: i32,                        // NONE, LINEAR, RADIAL, CONIC
+    p0: float2, p1: float2,           // linear: the ends; radial: center, focal point; conic: center
+    radius: f32, angle: f32,          // radial; conic
+    spread: i32,                      // PAD, REPEAT, REFLECT
+    space: i32,                       // INTERPOLATE_SRGB, LINEAR or OKLAB
+    stops: Stop[..16],                // inline, up to MAX_STOPS
 }
 
 struct Paint {
-    source: Source = Source.Solid { color: Color { 1, 1, 1, 1 } },
-    image: Image = Image {},          // texture, sampler, uv transform, source rect; none by default
-    image_mode: i32 = 1,              // IMAGE_MULTIPLY; also REPLACE, ADD, OVERLAY, ALPHA_MASK
-    paint_space: i32 = 0,             // LOCAL: moves with the shape's transform; or SCREEN
+    color: Color = WHITE,             // the source, or a tint multiplying the gradient
+    gradient: Gradient = { .. },      // kind NONE: the color alone
+    image: Image = { .. },            // texture, placement, source rect, wrap, filter; none by default
+    image_mode: i32 = 0,              // IMAGE_MULTIPLY; also REPLACE, ADD, MASK
     opacity: f32 = 1.0,
-    blend: i32 = 0,                   // BLEND_NORMAL (source-over, premultiplied)
+    blend: i32 = 0,                   // BLEND_NORMAL, ADD, MULTIPLY, REPLACE
+    space: i32 = 0,                   // SPACE_LOCAL: moves with the shape; or SPACE_SCREEN
 }
 ```
 
-* **The shader evaluates paint in this order:** the source color (solid or
-  gradient), then the image sample combined with it by `image_mode`, then
-  `opacity`, then the shape's coverage, and finally the result is blended
-  into the target by `blend`.
-* **Gradients** have any number of stops, a spread mode (`PAD`, `REPEAT`,
-  `REFLECT`) and an interpolation space. They're baked into rows of a
-  256-wide *ramp atlas* texture, and identical ramps in the same frame
-  share a row (rows are looked up by hash). The paint itself carries only a
-  row index and the gradient's geometry, so the number of stops doesn't
-  affect instance size.
-* **Images** carry a `gfx::Texture`, a sampler (`LINEAR` or `NEAREST`, and
-  `REPEAT`, `CLAMP` or `MIRROR`), a 2×3 uv transform and an optional source
-  rectangle, which covers sprite sheets and patterns. When a paint has an
-  image and no source, the image is just drawn: `IMAGE_REPLACE` with a
-  white tint.
+This is a struct rather than an enum of sources, so a struct literal can
+set just the fields it needs, as in `Paint { gradient: g, opacity: 0.5 }`.
+A `Gradient` holds its stops inline (`Stop[..16]`), so a `Paint` is a flat
+value with no allocation.
+
+* **The shader evaluates paint in this order:** the source (the color, or
+  the gradient tinted by the color), then the image sample combined with
+  it by `image_mode`, then `opacity`, then the shape's coverage, and
+  finally the result is blended into the target by `blend`.
+* **Gradients** have up to 16 stops, a spread mode (`PAD`, `REPEAT`,
+  `REFLECT`) and an interpolation space. They're baked on the CPU
+  (`paint.goose`, testable without a GPU) into rows of a 256-wide *ramp
+  atlas* texture, stored premultiplied so filtering doesn't darken where
+  alpha changes. Gradients in the same frame with the same stops and space
+  share a row. The paint carries only a row index and the gradient's
+  geometry. A radial gradient's focal point is clamped to inside its
+  circle.
+* **Images** carry a `gfx::Texture`, a placement (an `Affine` from the
+  image's pixels into the paint's space), an optional source rectangle in
+  pixels (sprite sheets), a wrap mode (`CLAMP`, `REPEAT`, `MIRROR`,
+  `DECAL`) and a filter (`LINEAR`, `NEAREST`). A whole texture wraps by its
+  sampler. A part of one wraps in the shader, inset half a texel so that
+  its neighbors never bleed in, and mip level comes from the unwrapped
+  coordinates so the seam doesn't drop to the smallest mip. The default
+  mode, `IMAGE_MULTIPLY` with a white color, draws the image as it is.
+* **Paint records** are deduplicated against the last one added, so a loop
+  drawing many shapes with one paint uploads it once. A shape drawn with a
+  `Color` uses paint 0, "the instance's color alone", and needs no record.
 * **Blend modes on a paint** are the ones `gfx`'s fixed-function blending
   provides, with coverage and opacity folded into what the shader outputs:
   * `NORMAL` is `gfx::BLEND_PREMULTIPLIED`, with the shader outputting
@@ -265,10 +281,17 @@ struct Paint {
   available on layers (see below), where a composite pass samples both the
   layer and a copy of the destination and blends in the shader. This costs
   an extra pass per layer.
-* **Shorthands:** every function that takes a `Paint` has an overload that
-  takes a `Color`. `solid(c)`, `linear(p0, p1, c0, c1)`,
-  `radial(center, r, c0, c1)` and `pattern(texture)` build the common
-  paints in one call.
+* **Shorthands:** every shape takes a `Color` or a `Paint` in the same
+  position (the parameter is generic, so there's one function per shape,
+  not two). `solid(c)`, `linear(x0, y0, x1, y1, c0, c1)`,
+  `radial(cx, cy, r, inner, outer)`, `pattern(texture)`, `paint(gradient)`,
+  `paint(image)`, `with_opacity` and `with_blend` build the common paints in
+  one call.
+* **Batches** are keyed by blend mode and image (texture and sampler). A
+  shape without an image fits any batch of its blend mode, and a batch
+  without an image takes the first image that comes, so solid shapes
+  between sprites from one sheet don't break the batch. The ramp atlas is
+  always bound, so gradients never break a batch.
 
 ## Shapes (`gfx2d.goose`)
 
@@ -285,7 +308,7 @@ either a `Color` or a `Paint`:
 | line | | `line(x0, y0, x1, y1, width, paint)`, with caps |
 | triangle, quad | `triangle(a, b, c, paint)`, `quad(a, b, c, d, paint)` | via paths |
 | polygon | `polygon(points, paint)`, `regular_polygon(c, n, r, paint)` | `polyline(points, width, paint)`, `polygon_outline` |
-| image | `image(tex, x, y)`, `image(tex, dst_rect, src_rect)`, `nine_slice(...)` | |
+| image | `image(tex, x, y)`, `image(tex, dst_rect, src_rect)`, `nine_slice(...)` (seamless: inner edges are hard, half-open by pixel center) | |
 | shadow | `box_shadow(x, y, w, h, r, blur, color)` | |
 
 Overloads also accept `float2` points and a `Rect { x, y, w, h }` struct, so
@@ -596,8 +619,9 @@ Ordered by value to typical users. The first group belongs in v1.
    line; fills and outlines), transforms, the color module, the test runner,
    pure and headless tests, and `examples/shapes.goose`. The sidecar and
    CMake wait for phase 4, the first C.
-2. **Paint**: gradients with the ramp atlas, image patterns and image
-   modes, blend modes, images and sprites, nine-slice.
+2. **Paint** (done): gradients with the ramp atlas, image patterns and
+   image modes, the four fixed-function blend modes, images and sprites,
+   nine-slice, and `examples/paint.goose`.
 3. **Paths**: flattening, convex and general tessellation, the fringe,
    stroker with joins, caps and dashes, retained meshes, polygons.
 4. **Text**: the stb_truetype layer, the vendored Inter subset, SDF atlas,
