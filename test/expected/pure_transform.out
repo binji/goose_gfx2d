@@ -1,0 +1,12 @@
+translation: vec2<f32> { 13.0, 24.0 }
+scaling: vec2<f32> { 6.0, 12.0 }
+rotation: true
+rotation_about: true
+skewing: true
+mul: vec2<f32> { 16.0, 8.0 } vec2<f32> { 6.0, 8.0 }
+invert: true true true
+invert a flat matrix: false
+determinant: 6.0 angle true scales vec2<f32> { 2.0, 3.0 }
+rects: vec2<f32> { 20.0, 15.0 } true false gfx2d::Rect { 20.0, 10.0, 10.0, 5.0 } gfx2d::Rect { 10.0, 0.0, 30.0, 20.0 } gfx2d::Rect { 8.0, 8.0, 24.0, 14.0 }
+bounds: gfx2d::Rect { 15.0, 5.0, 10.0, 20.0 }
+fit: gfx2d::Rect { 0.0, 0.0, 200.0, 200.0 } gfx2d::Rect { 0.0, 50.0, 200.0, 100.0 } gfx2d::Rect { -100.0, 0.0, 400.0, 200.0 }

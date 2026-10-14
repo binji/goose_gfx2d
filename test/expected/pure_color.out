@@ -1,0 +1,17 @@
+rgb: 0xFF336699 0x80336699 0x04010203 0x80112233
+hex #fff: true 0xFFFFFFFF
+hex #0F08: true 0x8800FF00
+hex 336699: true 0xFF336699
+hex #33669980: true 0x80336699
+hex #12345: false 0x00000000
+hex #ggg: false 0x00000000
+round trips: 125 colors, 0 off
+hsv: 0xFFFF0000 0xFF00FF00 0xFF000080 0xFFFFFF00
+oklab white: L true, a true, b true
+mix: 0xFF808080 0xFFBCBCBC 0xFFFF0000 0xFF0000FF 0x80FF0000
+over: 0xFF800080
+luminance: true true 0xFFFFFFFF 0xFF000000
+lighten: true true hue kept true
+rotate_hue full turn: true
+desaturate fully: 0xFF808080 gray 0xFFFFFFFF invert 0xFFCC9933
+palette: 4 0xFFE680A1 0xFF7CB764

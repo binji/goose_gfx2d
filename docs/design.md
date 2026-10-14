@@ -49,17 +49,20 @@ graph or retained UI (`ui` already exists), and 3D.
 ```
 goose_gfx2d/
   gfx2d.goose          the entry: frames, canvases, shapes, paints, transforms, images
-  color.goose          gfx2d.color: Color, conversions, manipulation (no GPU, no C)
-  path.goose           gfx2d.path: paths, flattening, stroking, tessellation (no GPU, no C)
-  text.goose           gfx2d.text: fonts, measuring, layout, drawing
-  gfx2d.build          sidecar: cmake_target = "goose_gfx2d_package"; main_thread_only
-  CMakeLists.txt       builds the text layer with stb_truetype and stb_rect_pack
+  color.goose          Color, conversions, manipulation (no GPU, no C)
+  transform.goose      Affine, Rect, fit (no GPU, no C)
+  path.goose           paths, flattening, stroking, tessellation (no GPU, no C)
+  text.goose           fonts, measuring, layout, drawing
+  gfx2d.build          sidecar, from phase 4: cmake_target = "goose_gfx2d_package"; main_thread_only
+  CMakeLists.txt       from phase 4: builds the text layer with stb_truetype and stb_rect_pack
   src/
-    shaders/           shape.vert, shape.frag, mesh.vert, mesh.frag, blit.frag (embed_shader by file)
+    shaders/           shape.glsl/.vert/.frag; later mesh.*, paint.glsl, blit.frag (embed_shader by file)
     text/              text_api.h (GS_GFX2D_TEXT_API), text_font.c, text_atlas.c, text_stb.c
   docs/                design.md (this), gfx2d.md, color.md, path.md, text.md
   examples/            small programs, each a root file
   test/
+    run_tests.py       runs pure/ and headless/, compares with expected/
+    expected/          <dir>_<name>.out
     api_check.py       text_api.h and text.goose agree, as goose_gfx's does
     headless/          render to a texture, read back, compare (GOOSE_GFX_HEADLESS=1)
     pure/              color, path and tessellation tests that need no GPU
@@ -152,9 +155,14 @@ gfx2d::clip_rounded_rect(0, 0, 300, 200, 24) {
 ## Coordinates and frames
 
 * **Coordinates are pixels**, with the origin at the top left and y pointing
-  down, like the screen and texture coordinates in `gfx`. All values are
-  `f32`. Integer arguments widen implicitly, so `circle(400, 300, 100, c)` is
-  valid.
+  down, like the screen and texture coordinates in `gfx`.
+* **Scalar parameters are `f64`.** A Goose float variable is `f64` by
+  default and doesn't narrow to `f32` implicitly. Integers, `f32` and
+  `f64` all pass to an `f64` parameter, so `circle(x, y, r, c)` works
+  whatever types the caller's variables have. The library narrows to `f32`
+  internally. Structs that are GPU data, or that are built from
+  `float2`/`float4` (`Affine`, `Rect`, corner radii), stay `f32`.
+  `rect_of(x, y, w, h)` builds a `Rect` from any numbers.
 * **High-density displays.** `gfx` works in pixels and reports the mouse in
   pixels. `gfx2d::set_scale(s)` (or `frame(clear, scale)`) adds a base scale
   so that a program can draw in logical units, and hit testing divides the
@@ -398,8 +406,9 @@ flicker that sub-pixel strokes cause.
   * the common currency signs and arrows,
   * `kern`/`GPOS` kerning.
 
-  The subset is about 100 KB. CMake turns the file into a C byte array in
-  the text layer, so the default font needs no file at run time. A script
+  The subset is about 100 KB. `text.goose` includes it with Goose's
+  `embed_file`, which puts it in the program's static data, so the default
+  font needs no file at run time and no C build step of its own. A script
   under `third_party/fonts/` records the exact command and the upstream
   version, so the subset can be regenerated. The subset keeps the license
   notice, and if the font declares a Reserved Font Name, the subset is
@@ -582,9 +591,11 @@ Ordered by value to typical users. The first group belongs in v1.
 
 ## Phases
 
-1. **Core**: the package skeleton, CMake and sidecar, the `shape` pipeline,
-   solid-color analytic shapes (rect, rounded rect, circle, ellipse, line),
-   transforms, color module, headless tests.
+1. **Core** (done): the package skeleton, the `shape` pipeline, solid-color
+   analytic shapes (rect, rounded rect, circle, ellipse, ring, pie, arc,
+   line; fills and outlines), transforms, the color module, the test runner,
+   pure and headless tests, and `examples/shapes.goose`. The sidecar and
+   CMake wait for phase 4, the first C.
 2. **Paint**: gradients with the ramp atlas, image patterns and image
    modes, blend modes, images and sprites, nine-slice.
 3. **Paths**: flattening, convex and general tessellation, the fringe,

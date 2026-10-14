@@ -1,0 +1,28 @@
+aligned rect: 450 full, 0 partial; corners 255,255,255,255 255,255,255,255 outside 0,0,0,255 0,0,0,255
+color: 51,102,153,255
+half red over blue: true
+circle: ok
+off-grid circle: ok
+ellipse: ok
+rounded rect: ok
+corner radii: ok
+rect outline: ok
+ring: ok
+circle outline, hairline: ok
+quarter pie: ok
+three-quarter pie: ok
+full pie: ok
+whole arc: ok
+arc: ok
+round-capped arc: ok
+line: ok
+round-capped line: ok
+square-capped line: ok
+rotated rect: ok
+scaled circle: ok
+squashed circle: ok
+skewed rect: ok
+transform restored: true true
+to_local: vec2<f32> { 10.0, 10.0 }
+stats: 1001 instances, 1 draw
+screen: 255,0,0,255 16,32,48,255

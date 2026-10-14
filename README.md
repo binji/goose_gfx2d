@@ -7,7 +7,10 @@ lines, polygons and Bézier paths), fills and strokes, solid, gradient and
 image paints with blend modes, 2D transforms, clipping, color math, and
 scalable SDF text. All of it is drawn through `gfx` and SDL3's GPU API.
 
-**Status: design.** See [docs/design.md](docs/design.md).
+**Status: phase 1 of [the design](docs/design.md).** Solid-color shapes
+(rectangles, rounded rectangles, circles, ellipses, rings, pies, arcs and
+lines; filled or outlined), transforms and colors work. Gradients, images,
+paths and text come next.
 
 ## Using it
 
@@ -29,16 +32,25 @@ fn main() {
 
 | | |
 |---|---|
-| `gfx2d.goose`, `color.goose`, `path.goose`, `text.goose` | the modules, all in `namespace gfx2d`; only `text.goose` declares `extern fn`s |
-| `gfx2d.build` | the package's sidecar: the CMake target to build, and that its functions run on the main thread only |
-| `CMakeLists.txt` | builds the text layer (stb_truetype, stb_rect_pack) as a static library, carried by the target `goose_gfx2d_package` |
+| `gfx2d.goose` | the entry: frames, the current transform, shapes, and the renderer |
+| `color.goose`, `transform.goose` | colors, and affine transforms and rectangles: plain Goose, no GPU |
 | `src/shaders/` | the GLSL that `gfx2d.goose` embeds with `embed_shader` |
-| `src/text/` | the text layer; `text_api.h` lists every function `text.goose` declares, and `test/api_check.py` checks the two agree |
-| `test/pure/` | color, path and tessellation tests that need no GPU |
-| `test/headless/` | render into a texture, read it back, compare |
-| `test/window/` | the showcase, which needs a display and a GPU |
-| `third_party/stb` | shallow submodule; clone with `--recursive` |
-| `third_party/fonts/` | the default font, a Latin subset of Inter Regular, with its license (OFL 1.1) |
+| `examples/` | programs using the package, each a root file |
+| `test/run_tests.py` | runs `test/pure/` (no GPU) and `test/headless/` (renders into a texture and reads it back), comparing with `test/expected/` |
+
+All the modules are in `namespace gfx2d`. Planned (see the design): `path.goose`, and `text.goose` with
+its C layer under `src/text/`, built by a `gfx2d.build` sidecar and
+`CMakeLists.txt` with stb_truetype (`third_party/stb`) and a default font
+(`third_party/fonts/`, Inter, OFL 1.1).
+
+## Testing
+
+```bash
+python test/run_tests.py --goose path/to/goose      # or GOOSE=..., or goose on the PATH
+goose examples/shapes.goose                          # a window
+```
+
+Headless tests need a GPU device; without one they are reported skipped.
 
 ## License
 
