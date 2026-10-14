@@ -48,6 +48,7 @@ fn main() {
 | `src/shaders/` | the GLSL that `gfx2d.goose` embeds with `embed_shader` |
 | `src/text/` | the text layer; `text_api.h` lists every function `text.goose` declares, and `test/api_check.py` checks the two agree |
 | `examples/` | programs using the package, each a root file |
+| `bench/` | benchmarks: `bench.goose`, `run_bench.py` and the latest `results.md` |
 | `test/run_tests.py` | runs the API check, `test/pure/` (no GPU) and `test/headless/` (renders into a texture and reads it back), comparing with `test/expected/` |
 | `third_party/stb` | shallow submodule; clone with `--recursive` |
 | `third_party/fonts/` | the built-in font, a Latin subset of Inter Regular, its license (OFL 1.1), and the script that made it |
