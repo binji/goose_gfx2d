@@ -34,6 +34,7 @@ import gfx;
 import color;
 import transform;
 import paint;
+import path;
 
 // --- instances: src/shaders/shape.glsl ------------------------------------------
 
@@ -84,6 +85,15 @@ let PAINT_SCREEN: u32 = 1;
 let INSTANCE_SIZE = 112;
 let PAINT_SIZE = 96;
 
+// One vertex of a tessellated path, as src/shaders/mesh.vert reads it.
+struct MeshVertex {
+    pos: float2,            // pixels
+    user: float2,           // the space it was drawn in, for its paint
+    color: float4,
+    alpha: f32,             // coverage
+    paint: u32,
+}
+
 // The shaders' uniform blocks, rounded to 16 bytes as std140 does.
 struct FrameUniforms { view: float4, base: u32, pad 12 }
 struct BlendUniforms { blend: u32, pad 12 }
@@ -98,7 +108,12 @@ let CAP_SQUARE = 2;     // half the width past it
 // What gfx2d keeps of the GPU, made again when gfx is opened again.
 struct Renderer {
     opened: i64 = -1,                   // the gfx::open_count() these were made under
-    pipelines: gfx::Pipeline[4] = [gfx::Pipeline { 0 }; 4],     // by BLEND_*
+    pipelines: gfx::Pipeline[4] = [gfx::Pipeline { 0 }; 4],     // shapes, by BLEND_*
+    mesh_pipelines: gfx::Pipeline[4] = [gfx::Pipeline { 0 }; 4],
+    vertices: gfx::Buffer = gfx::Buffer { 0 },
+    vertex_bytes: i64 = 0,
+    indices: gfx::Buffer = gfx::Buffer { 0 },
+    index_bytes: i64 = 0,
     instances: gfx::Buffer = gfx::Buffer { 0 },
     instance_bytes: i64 = 0,
     paints: gfx::Buffer = gfx::Buffer { 0 },
@@ -111,8 +126,11 @@ struct Renderer {
 }
 var renderer: Renderer;
 
-// A run of instances drawn with one draw call: one blend mode, one image.
-struct Batch { first: i64, count: i64, blend: i32, texture: gfx::Texture, sampler: i64 }
+// What one draw call draws: a run of shape instances, or of mesh indices;
+// one blend mode, one image.
+let BATCH_SHAPES = 0;
+let BATCH_MESH = 1;
+struct Batch { kind: i64, first: i64, count: i64, blend: i32, texture: gfx::Texture, sampler: i64 }
 
 // The frame being recorded.
 struct FrameState {
@@ -125,6 +143,8 @@ struct FrameState {
 var state = FrameState { transform: IDENTITY, .. };
 
 var instances: Instance[>..<] = [];
+var mesh_vertices: MeshVertex[>..<] = [];
+var mesh_indices: u32[>..<] = [];
 var batches: Batch[>..<] = [];
 var paints: PaintGPU[>..<] = [];
 var ramp_gradients: Gradient[>..<] = [];    // the frame's ramps, a row each
@@ -132,7 +152,7 @@ var ramp_pixels: u8[>..<] = [];
 var saved: Affine[>..<] = [];               // push()'s transforms
 
 // What the last end() drew.
-struct Stats { instances: i64, draws: i64, paints: i64, ramps: i64 }
+struct Stats { instances: i64, triangles: i64, draws: i64, paints: i64, ramps: i64 }
 var last_stats: Stats;
 
 var misuse_count = 0;
@@ -167,6 +187,8 @@ fn begin_into(target: gfx::Texture, clear: bool, clear_color: Color) {
     state = FrameState { drawing: true, target: target, clear: clear, clear_color: clear_color,
                          transform: IDENTITY };
     instances.resize(0);
+    mesh_vertices.resize(0);
+    mesh_indices.resize(0);
     batches.resize(0);
     saved.resize(0);
     ramp_gradients.resize(0);
@@ -205,8 +227,11 @@ fn ensure_renderer() {
     renderer = Renderer { opened: gfx::open_count() };
     let modes: i32[4] = [gfx::BLEND_PREMULTIPLIED, gfx::BLEND_ADD, gfx::BLEND_MULTIPLY,
                          gfx::BLEND_NONE];
+    let mesh_vs = embed_shader("src/shaders/mesh.vert");
+    let mesh_fs = embed_shader("src/shaders/mesh.frag");
     for mode, i in modes {
         renderer.pipelines[i] = gfx::pipeline(vs, fs, gfx::PipelineDesc { blend: mode });
+        renderer.mesh_pipelines[i] = gfx::pipeline(mesh_vs, mesh_fs, gfx::PipelineDesc { blend: mode });
     }
     let filters: i32[2] = [gfx::LINEAR, gfx::NEAREST];
     let wraps: i32[3] = [gfx::REPEAT, gfx::MIRROR, gfx::CLAMP];
@@ -218,13 +243,14 @@ fn ensure_renderer() {
     gfx::update_texture(renderer.white, white);
 }
 
-// Puts `data` in a storage buffer of at least its size, made again larger
-// when it has outgrown the one there.
-fn upload(b: gfx::Buffer&, capacity: i64&, data: const u8[:]) {
+// Puts `data` in a buffer of at least its size, made again larger when it
+// has outgrown the one there.
+fn upload(b: gfx::Buffer&, capacity: i64&, usage: i64, data: const u8[:]) {
+    if data.len == 0 { return; }
     if data.len > capacity {
         if capacity > 0 { gfx::release(b); }
         capacity = max(data.len, max(capacity * 2, 16384));
-        b = gfx::buffer(gfx::BUFFER_STORAGE, capacity, data);
+        b = gfx::buffer(usage, capacity, data);
     } else {
         gfx::update_buffer(b, data);
     }
@@ -243,13 +269,15 @@ fn upload_ramps() {
 }
 
 fn flush_batches() {
-    last_stats = Stats { instances: instances.len, draws: batches.len, paints: paints.len - 1,
-                         ramps: ramp_gradients.len };
-    if instances.len == 0 && !state.clear { return; }
+    last_stats = Stats { instances: instances.len, triangles: mesh_indices.len / 3,
+                         draws: batches.len, paints: paints.len - 1, ramps: ramp_gradients.len };
+    if batches.len == 0 && !state.clear { return; }
     ensure_renderer();
-    if instances.len > 0 {
-        upload(renderer.instances, renderer.instance_bytes, bytes_of(instances));
-        upload(renderer.paints, renderer.paint_bytes, bytes_of(paints));
+    if batches.len > 0 {
+        upload(renderer.instances, renderer.instance_bytes, gfx::BUFFER_STORAGE, bytes_of(instances));
+        upload(renderer.vertices, renderer.vertex_bytes, gfx::BUFFER_VERTEX, bytes_of(mesh_vertices));
+        upload(renderer.indices, renderer.index_bytes, gfx::BUFFER_INDEX, bytes_of(mesh_indices));
+        upload(renderer.paints, renderer.paint_bytes, gfx::BUFFER_STORAGE, bytes_of(paints));
         upload_ramps();
     }
     let info = gfx::texture_info(state.target);
@@ -259,8 +287,14 @@ fn flush_batches() {
     guard gfx::begin_pass(pass) else { return; }
     let ramps = if renderer.ramp_rows > 0 { renderer.ramps } else { renderer.white };
     for b in batches {
-        gfx::bind(renderer.pipelines[b.blend]);
-        gfx::bind_storage_buffer(gfx::VERTEX, 0, renderer.instances);
+        if b.kind == BATCH_SHAPES {
+            gfx::bind(renderer.pipelines[b.blend]);
+            gfx::bind_storage_buffer(gfx::VERTEX, 0, renderer.instances);
+        } else {
+            gfx::bind(renderer.mesh_pipelines[b.blend]);
+            gfx::bind_vertex_buffer(renderer.vertices);
+            gfx::bind_index_buffer(renderer.indices, 4);
+        }
         gfx::bind_storage_buffer(gfx::FRAGMENT, 0, renderer.paints);
         gfx::bind_texture(gfx::FRAGMENT, 0, ramps, renderer.samplers[2]);   // linear, clamped
         let image = if b.texture.id == 0 { renderer.white } else { b.texture };
@@ -268,7 +302,8 @@ fn flush_batches() {
         gfx::uniforms(gfx::VERTEX, 0, FrameUniforms {
             view: float4 { info.width, info.height, 0.0, 0.0 }, base: b.first as u32 });
         gfx::uniforms(gfx::FRAGMENT, 0, BlendUniforms { blend: b.blend as u32 });
-        gfx::draw(b.count * 6);
+        if b.kind == BATCH_SHAPES { gfx::draw(b.count * 6); }
+        else { gfx::draw_indexed(b.count, 1, b.first, 0, 0); }
     }
     gfx::end_pass();
 }
@@ -334,30 +369,48 @@ fn paint_index(p: Paint) -> u32 {
 
 // Records one shape: `local` places its local space under the current
 // transform. A Color paints it alone; a Paint as paint.goose says.
-fn add(kind: u32, flags: u32, local: Affine, geom: float4, radii: float4, c: Color) {
-    add_instance(kind, flags, local, geom, radii, to_float4(c), 0, BLEND_NORMAL, gfx::Texture { 0 }, 2);
+// How a Color or a Paint is drawn: its color, its paint record, and what
+// its batch needs.
+struct PaintKey { color: float4, paint: u32, blend: i32, texture: gfx::Texture, sampler: i64 }
+
+fn paint_key(c: Color) -> PaintKey {
+    PaintKey { color: to_float4(c), paint: 0, blend: BLEND_NORMAL, texture: gfx::Texture { 0 },
+               sampler: 2 }
 }
-fn add(kind: u32, flags: u32, local: Affine, geom: float4, radii: float4, p: Paint) {
+fn paint_key(p: Paint) -> PaintKey {
     let img = p.image;
     let has_image = img.texture.id != 0;
     let wrap = if img.wrap == WRAP_REPEAT { 0 } else if img.wrap == WRAP_MIRROR { 1 } else { 2 };
     let sampler = (if img.filter == FILTER_NEAREST { 3 } else { 0 }) + wrap;
-    add_instance(kind, flags, local, geom, radii, to_float4(p.color), paint_index(p),
-                 clamp(p.blend, 0, 3), if has_image { img.texture } else { gfx::Texture { 0 } },
-                 if has_image { sampler } else { 2 });
+    PaintKey { color: to_float4(p.color), paint: paint_index(p), blend: clamp(p.blend, 0, 3),
+               texture: if has_image { img.texture } else { gfx::Texture { 0 } },
+               sampler: if has_image { sampler } else { 2 } }
 }
 
-fn add_instance(kind: u32, flags: u32, local: Affine, geom: float4, radii: float4, color: float4,
-                paint: u32, blend: i32, texture: gfx::Texture, sampler: i64) {
-    if !state.drawing {
-        misuse("drawing outside a frame: begin() first");
-        return;
-    }
+fn drawing() -> bool {
+    if !state.drawing { misuse("drawing outside a frame: begin() first"); }
+    state.drawing
+}
+
+// Records one shape: `local` places its local space under the current
+// transform. A Color paints it alone; a Paint as paint.goose says.
+fn add(kind: u32, flags: u32, local: Affine, geom: float4, radii: float4, c) {
+    guard drawing();
+    let k = paint_key(c);
     let m = mul(state.transform, local);
     instances.push(Instance { m: float4 { m.a, m.b, m.c, m.d }, t: float2 { m.tx, m.ty },
-                              kind: kind, flags: flags, geom: geom, radii: radii, color: color,
+                              kind: kind, flags: flags, geom: geom, radii: radii, color: k.color,
                               lm: float4 { local.a, local.b, local.c, local.d },
-                              lt: float2 { local.tx, local.ty }, paint: paint });
+                              lt: float2 { local.tx, local.ty }, paint: k.paint });
+    batch(BATCH_SHAPES, instances.len - 1, 1, k);
+}
+
+// Puts `count` more instances or indices from `first` in the last batch,
+// or a new one.
+fn batch(kind: i64, first: i64, count: i64, k: PaintKey) {
+    let blend = k.blend;
+    let texture = k.texture;
+    let sampler = k.sampler;
     // A batch is one blend mode and one image. A shape with no image fits
     // any batch of its blend mode (it samples the white texture, or
     // whatever is bound, and ignores it), and a batch with no image yet
@@ -365,20 +418,20 @@ fn add_instance(kind: u32, flags: u32, local: Affine, geom: float4, radii: float
     let n = batches.len;
     if n > 0 {
         let last .= batches[n - 1];
-        if last.blend == blend {
+        if last.kind == kind && last.blend == blend {
             if texture.id == 0 || (last.texture == texture && last.sampler == sampler) {
-                last.count++;
+                last.count += count;
                 return;
             }
             if last.texture.id == 0 {
                 last.texture = texture;
                 last.sampler = sampler;
-                last.count++;
+                last.count += count;
                 return;
             }
         }
     }
-    batches.push(Batch { first: instances.len - 1, count: 1, blend: blend, texture: texture,
+    batches.push(Batch { kind: kind, first: first, count: count, blend: blend, texture: texture,
                          sampler: sampler });
 }
 
@@ -640,4 +693,141 @@ fn nine_slice(t: gfx::Texture, dst: Rect, src: Rect, insets: float4, tint: Color
 fn nine_slice(t: gfx::Texture, dst: Rect, insets: float4, tint: Color = WHITE,
               filter: i64 = FILTER_LINEAR) {
     nine_slice(t, dst, texture_rect(t), insets, tint, filter);
+}
+
+// --- paths -------------------------------------------------------------------------------
+//
+// Fills and strokes of paths (path.goose), and the shapes made of straight
+// lines: polygons, polylines, triangles, regular polygons and stars. They
+// are tessellated each time they are drawn, into triangles with an
+// antialiasing fringe, in pixels.
+
+// Pixels the curves of paths may be off by. Flattened points lie on the
+// curve, so a flattened outline is inside it, by up to this much: small
+// enough that the area lost is a fraction of what antialiasing blurs.
+let TOLERANCE: f32 = 0.1;
+
+var flat_pts: float2[>..<] = [];
+var flat_contours: Contour[>..<] = [];
+var dash_pts: float2[>..<] = [];
+var dash_cs: Contour[>..<] = [];
+var outline_pts: float2[>..<] = [];
+var outline_cs: Contour[>..<] = [];
+var tess_out: TessVertex[>..<] = [];
+var tess_idx: u32[>..<] = [];
+
+// The current transform's scale: how many pixels a unit is, on average.
+fn pixel_scale() -> f32 { sqrt(abs(determinant(state.transform))) }
+
+// tess_out and tess_idx, in pixels, as a mesh painted with c, its alpha
+// multiplied by k.
+fn add_mesh(c, k: f32) {
+    if tess_idx.len == 0 { return; }
+    let key = paint_key(c);
+    let inv, ok = invert(state.transform);
+    let base = mesh_vertices.len as u32;
+    for v in tess_out {
+        mesh_vertices.push(MeshVertex { pos: v.p, user: if ok { apply(inv, v.p) } else { v.p },
+                                        color: key.color, alpha: v.alpha * k, paint: key.paint });
+    }
+    let first = mesh_indices.len;
+    for i in tess_idx { mesh_indices.push(base + i); }
+    batch(BATCH_MESH, first, tess_idx.len, key);
+}
+
+// The flattened contours in flat_pts, in pixels, filled.
+fn fill_flat(c, rule: i64) {
+    tess_out.resize(0);
+    tess_idx.resize(0);
+    fill_triangles(flat_pts, flat_contours, rule, 1.0, tess_out, tess_idx);
+    add_mesh(c, 1.0);
+}
+
+// The path filled by `rule`, NONZERO or EVEN_ODD.
+fn fill(p: const Path&, c, rule: i64 = NONZERO) {
+    guard drawing();
+    flat_pts.resize(0);
+    flat_contours.resize(0);
+    flatten(p, state.transform, TOLERANCE, flat_pts, flat_contours);
+    fill_flat(c, rule);
+}
+
+// The path stroked `width` wide, with miter joins and butt caps.
+fn stroke(p: const Path&, width: f64, c) { stroke(p, Stroke { width: width as f32 }, c); }
+
+// The path stroked as `s` says. The stroke is made in the space the path is
+// drawn in, so under a stretching transform it stretches too, as a pen
+// would; with s.pixels, in pixels, the same width whatever the transform.
+fn stroke(p: const Path&, s: Stroke, c) {
+    guard drawing();
+    let scale = if s.pixels { 1.0 } else { max(pixel_scale(), 0.000001) };
+    // Pixels in the stroke's space.
+    let px = 1.0 / scale;
+    // Thinner than a pixel: a pixel wide, as faint as it is thin.
+    let width_px = abs(s.width) * scale;
+    let k = min(width_px, 1.0);
+    let half = max(width_px, 1.0) * 0.5 * px;
+    flat_pts.resize(0);
+    flat_contours.resize(0);
+    flatten(p, if s.pixels { state.transform } else { IDENTITY }, TOLERANCE * px, flat_pts,
+            flat_contours);
+    outline_pts.resize(0);
+    outline_cs.resize(0);
+    if s.dash.len > 0 {
+        dash_pts.resize(0);
+        dash_cs.resize(0);
+        dash_contours(flat_pts, flat_contours, s.dash, s.dash_offset, dash_pts, dash_cs);
+        stroke_outline(dash_pts, dash_cs, half, s.join, s.cap, s.miter_limit, TOLERANCE * px,
+                       outline_pts, outline_cs);
+    } else {
+        stroke_outline(flat_pts, flat_contours, half, s.join, s.cap, s.miter_limit,
+                       TOLERANCE * px, outline_pts, outline_cs);
+    }
+    if !s.pixels {
+        for &q in outline_pts { q = apply(state.transform, q); }
+    }
+    tess_out.resize(0);
+    tess_idx.resize(0);
+    fill_triangles(outline_pts, outline_cs, NONZERO, 1.0, tess_out, tess_idx);
+    add_mesh(c, k);
+}
+
+// Through the points, closed, filled by the nonzero rule.
+fn polygon(points: const float2[:], c) {
+    guard drawing();
+    flat_pts.resize(0);
+    flat_contours.resize(0);
+    for q in points { flat_pts.push(apply(state.transform, q)); }
+    flat_contours.push(Contour { first: 0, count: points.len, closed: true });
+    fill_flat(c, NONZERO);
+}
+fn triangle(x0: f64, y0: f64, x1: f64, y1: f64, x2: f64, y2: f64, c) {
+    polygon([pt(x0, y0), pt(x1, y1), pt(x2, y2)], c);
+}
+fn triangle(a: float2, b: float2, d: float2, c) { polygon([a, b, d], c); }
+fn quad(a: float2, b: float2, d: float2, e: float2, c) { polygon([a, b, d, e], c); }
+
+// Strokes through points: open, or closed back to the first.
+fn polyline(points: const float2[:], width: f64, c, cap: i64 = CAP_BUTT, join: i64 = JOIN_MITER) {
+    var p = Path {};
+    p.polygon(points, false);
+    stroke(p, Stroke { width: width as f32, join: join as i32, cap: cap as i32 }, c);
+}
+fn polygon_outline(points: const float2[:], width: f64, c, join: i64 = JOIN_MITER) {
+    var p = Path {};
+    p.polygon(points, true);
+    stroke(p, Stroke { width: width as f32, join: join as i32 }, c);
+}
+
+// n corners on the circle of radius r about (cx, cy), the first at `angle`.
+fn regular_polygon(cx: f64, cy: f64, r: f64, n: i64, c, angle: f64 = -PI / 2) {
+    var p = Path {};
+    p.regular_polygon(cx, cy, r, n, angle);
+    fill(p, c);
+}
+// n points at radius `outer`, the corners between them at `inner`.
+fn star(cx: f64, cy: f64, n: i64, outer: f64, inner: f64, c, angle: f64 = -PI / 2) {
+    var p = Path {};
+    p.star(cx, cy, n, outer, inner, angle);
+    fill(p, c);
 }

@@ -22,10 +22,6 @@ layout(set = 3, binding = 0) uniform Blend { uint blend; };
 
 layout(location = 0) out vec4 result;
 
-const uint BLEND_NORMAL = 0u;
-const uint BLEND_ADD = 1u;
-const uint BLEND_MULTIPLY = 2u;
-
 // A box of half extents b with corner radii r (top left, top right, bottom
 // right, bottom left; y is down).
 float sd_rounded_box(vec2 p, vec2 b, vec4 r) {
@@ -101,13 +97,5 @@ void main() {
     // The paint is read in every fragment, uniformly, so the derivatives
     // the image's sampling takes stay defined.
     vec4 c = paint_color(paints[v_paint], v_color, v_user, gl_FragCoord.xy, ramp, image) * coverage;
-    if (blend == BLEND_ADD) {
-        // gfx's add: rgb * alpha + destination.
-        result = vec4(c.a > 0.0 ? c.rgb / c.a : vec3(0.0), c.a);
-    } else if (blend == BLEND_MULTIPLY) {
-        // gfx's multiply: rgb x destination; partly covered, partly so.
-        result = vec4(c.rgb + (1.0 - c.a), 1.0);
-    } else {
-        result = c;
-    }
+    result = blend_out(c, blend);
 }

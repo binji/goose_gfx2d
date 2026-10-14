@@ -7,12 +7,16 @@ lines, polygons and Bézier paths), fills and strokes, solid, gradient and
 image paints with blend modes, 2D transforms, clipping, color math, and
 scalable SDF text. All of it is drawn through `gfx` and SDL3's GPU API.
 
-**Status: phases 1 and 2 of [the design](docs/design.md).** Shapes
-(rectangles, rounded rectangles, circles, ellipses, rings, pies, arcs and
-lines; filled or outlined), transforms, colors, and paints (linear,
-radial and conic gradients, images, sprites, nine-slices, image patterns,
-gradients blended with images, four blend modes) work. Paths, text,
-clipping and layers come next.
+**Status: phases 1 to 3 of [the design](docs/design.md).** These work:
+- shapes (rectangles, rounded rectangles, circles, ellipses, rings, pies,
+  arcs and lines; filled or outlined),
+- transforms and colors,
+- paints (linear, radial and conic gradients, images, sprites,
+  nine-slices, patterns, gradients blended with images, four blend modes),
+- paths (Bézier curves, nonzero and even-odd fills, strokes with joins,
+  caps and dashes, polygons, polylines).
+
+Text, clipping and layers come next.
 
 ## Using it
 
@@ -35,12 +39,12 @@ fn main() {
 | | |
 |---|---|
 | `gfx2d.goose` | the entry: frames, the current transform, shapes, and the renderer |
-| `color.goose`, `transform.goose`, `paint.goose` | colors; affine transforms and rectangles; paints and gradient ramps: plain Goose, no GPU |
+| `color.goose`, `transform.goose`, `paint.goose`, `path.goose` | colors; affine transforms and rectangles; paints and gradient ramps; paths, tessellation and stroking: plain Goose, no GPU |
 | `src/shaders/` | the GLSL that `gfx2d.goose` embeds with `embed_shader` |
 | `examples/` | programs using the package, each a root file |
 | `test/run_tests.py` | runs `test/pure/` (no GPU) and `test/headless/` (renders into a texture and reads it back), comparing with `test/expected/` |
 
-All the modules are in `namespace gfx2d`. Planned (see the design): `path.goose`, and `text.goose` with
+All the modules are in `namespace gfx2d`. Planned (see the design): `text.goose`, with
 its C layer under `src/text/`, built by a `gfx2d.build` sidecar and
 `CMakeLists.txt` with stb_truetype (`third_party/stb`) and a default font
 (`third_party/fonts/`, Inter, OFL 1.1).

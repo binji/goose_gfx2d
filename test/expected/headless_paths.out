@@ -1,0 +1,18 @@
+square: ok
+circle: ok
+nonzero: ok
+even-odd: ok
+star: ok
+rotated, scaled: ok
+triangle: ok
+stroke: ok
+round caps: ok
+hairline: ok
+dashed: ok
+polyline: ok
+polygon outline: ok
+stretched stroke: ok
+stroke in pixels: ok
+crossing: 128,128,128,255 elsewhere 128,128,128,255 128,128,128,255 at the join 128,128,128,255
+gradient fill: true true hole 0,0,0,255
+order: 255,0,0,255 0,255,0,255 0,0,255,255; 2 instances, true triangles, 3 draws

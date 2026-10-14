@@ -112,3 +112,20 @@ vec4 paint_color(Paint g, vec4 tint, vec2 user, vec2 pixel, sampler2D ramp, samp
     }
     return c * g.g1.w;
 }
+
+const uint BLEND_NORMAL = 0u;
+const uint BLEND_ADD = 1u;
+const uint BLEND_MULTIPLY = 2u;
+
+// A premultiplied color, covered, as the batch's blend mode wants it out.
+vec4 blend_out(vec4 c, uint blend) {
+    if (blend == BLEND_ADD) {
+        // gfx's add: rgb * alpha + destination.
+        return vec4(c.a > 0.0 ? c.rgb / c.a : vec3(0.0), c.a);
+    }
+    if (blend == BLEND_MULTIPLY) {
+        // gfx's multiply: rgb x destination; partly covered, partly so.
+        return vec4(c.rgb + (1.0 - c.a), 1.0);
+    }
+    return c;
+}

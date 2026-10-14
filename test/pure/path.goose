@@ -1,0 +1,218 @@
+// gfx2d's paths without a GPU: building, flattening, and the triangles of
+// fills and strokes, checked by area: the triangles' areas add up to the
+// region the fill rule fills, exactly, whatever way it was cut up.
+import std;
+import vec;
+import math;
+import gfx2d from "../..";
+
+// The area the tessellation covers, weighting each triangle by its
+// vertices' mean alpha (1 inside, the fringe partly).
+fn covered(v: const gfx2d::TessVertex[:], idx: const u32[:]) -> f64 {
+    var sum = 0.0;
+    var i = 0;
+    while i + 2 < idx.len {
+        let a = v[idx[i]];
+        let b = v[idx[i + 1]];
+        let c = v[idx[i + 2]];
+        let area = abs(gfx2d::cross2(b.p - a.p, c.p - a.p)) * 0.5;
+        sum += area * (a.alpha + b.alpha + c.alpha) / 3.0;
+        i += 3;
+    }
+    sum
+}
+
+// The area a fill of p covers without a fringe, and with one a pixel wide.
+fn fill_area(p: const gfx2d::Path&, rule: i64, fringe: f32) -> f64 {
+    var pts: float2[>..<] = [];
+    var contours: gfx2d::Contour[>..<] = [];
+    gfx2d::flatten(p, gfx2d::IDENTITY, 0.01, pts, contours);
+    var v: gfx2d::TessVertex[>..<] = [];
+    var idx: u32[>..<] = [];
+    gfx2d::fill_triangles(pts, contours, rule, fringe, v, idx);
+    covered(v, idx)
+}
+
+fn stroke_area(p: const gfx2d::Path&, half: f32, join: i64, cap: i64, dash: const f32[:]) -> f64 {
+    var pts: float2[>..<] = [];
+    var contours: gfx2d::Contour[>..<] = [];
+    gfx2d::flatten(p, gfx2d::IDENTITY, 0.01, pts, contours);
+    var dpts: float2[>..<] = [];
+    var dcontours: gfx2d::Contour[>..<] = [];
+    if dash.len > 0 {
+        gfx2d::dash_contours(pts, contours, dash, 0, dpts, dcontours);
+    }
+    var opts: float2[>..<] = [];
+    var ocontours: gfx2d::Contour[>..<] = [];
+    if dash.len > 0 {
+        gfx2d::stroke_outline(dpts, dcontours, half, join, cap, 4, 0.01, opts, ocontours);
+    } else {
+        gfx2d::stroke_outline(pts, contours, half, join, cap, 4, 0.01, opts, ocontours);
+    }
+    var v: gfx2d::TessVertex[>..<] = [];
+    var idx: u32[>..<] = [];
+    gfx2d::fill_triangles(opts, ocontours, gfx2d::NONZERO, 0, v, idx);
+    covered(v, idx)
+}
+
+fn check(name: const u8[:], got: f64, want: f64, tolerance: f64) {
+    if abs(got - want) <= tolerance { print(name, ": ok"); }
+    else { print(name, ": got ", got, ", want ", want); }
+}
+
+fn main() {
+    var p = gfx2d::Path {};
+    gfx2d::move_to(p, 10, 10);
+    gfx2d::line_to(p, 20, 10);
+    gfx2d::quad_to(p, 30, 10, 30, 20);
+    gfx2d::cubic_to(p, 30, 30, 20, 40, 10, 30);
+    gfx2d::close(p);
+    print("elements: ", p.els.len, ", pen at ", gfx2d::current_point(p), ", bounds ", gfx2d::bounds(p));
+    var pts: float2[>..<] = [];
+    var contours: gfx2d::Contour[>..<] = [];
+    gfx2d::flatten(p, gfx2d::IDENTITY, 0.25, pts, contours);
+    print("flattened: ", contours.len, " contour, closed ", contours[0].closed, ", ",
+          contours[0].count > 6 && contours[0].count < 40, " points");
+    // Finer tolerance, more points.
+    var fine: float2[>..<] = [];
+    var fine_c: gfx2d::Contour[>..<] = [];
+    gfx2d::flatten(p, gfx2d::scaling(10), 0.25, fine, fine_c);
+    print("scaled up 10x: more points ", fine_c[0].count > contours[0].count);
+
+    // Fills, without a fringe: exact areas.
+    var sq = gfx2d::Path {};
+    gfx2d::rect(sq, 0, 0, 100, 100);
+    check("square", fill_area(sq, gfx2d::NONZERO, 0), 10000, 0.01);
+    var circle = gfx2d::Path {};
+    gfx2d::circle(circle, 50, 50, 40);
+    check("circle", fill_area(circle, gfx2d::NONZERO, 0), PI * 1600, 0.5);
+    // A hole wound the other way: out by either rule.
+    var holed = gfx2d::Path {};
+    gfx2d::rect(holed, 0, 0, 100, 100);
+    gfx2d::move_to(holed, 25, 25);
+    gfx2d::line_to(holed, 25, 75);
+    gfx2d::line_to(holed, 75, 75);
+    gfx2d::line_to(holed, 75, 25);
+    gfx2d::close(holed);
+    check("hole, nonzero", fill_area(holed, gfx2d::NONZERO, 0), 7500, 0.01);
+    check("hole, even-odd", fill_area(holed, gfx2d::EVEN_ODD, 0), 7500, 0.01);
+    // A hole wound the same way: filled by nonzero, out by even-odd.
+    var same = gfx2d::Path {};
+    gfx2d::rect(same, 0, 0, 100, 100);
+    gfx2d::rect(same, 25, 25, 50, 50);
+    check("same-way hole, nonzero", fill_area(same, gfx2d::NONZERO, 0), 10000, 0.01);
+    check("same-way hole, even-odd", fill_area(same, gfx2d::EVEN_ODD, 0), 7500, 0.01);
+    // A pentagram: nonzero fills its middle, even-odd does not.
+    var star = gfx2d::Path {};
+    let r = 50.0;
+    for i in 5 {
+        let a = -PI / 2 + i * 2 * TAU / 5;
+        if i == 0 { gfx2d::move_to(star, r * cos(a), r * sin(a)); } else { gfx2d::line_to(star, r * cos(a), r * sin(a)); }
+    }
+    gfx2d::close(star);
+    // The inner pentagon's circumradius is r * cos(72) / cos(36).
+    let ri = r * cos(TAU / 5) / cos(PI / 5);
+    let pentagon = 2.5 * ri * ri * sin(TAU / 5);
+    let points = 2.5 * r * ri * sin(PI / 5) * 2 - pentagon;
+    check("pentagram, nonzero", fill_area(star, gfx2d::NONZERO, 0), points + pentagon, 0.01);
+    check("pentagram, even-odd", fill_area(star, gfx2d::EVEN_ODD, 0), points, 0.01);
+    // A bow tie crosses itself in the middle.
+    var bow = gfx2d::Path {};
+    gfx2d::polygon(bow, [float2 { 0, 0 }, float2 { 100, 100 }, float2 { 100, 0 }, float2 { 0, 100 }]);
+    check("bow tie", fill_area(bow, gfx2d::NONZERO, 0), 5000, 0.01);
+    var starred = gfx2d::Path {};
+    gfx2d::star(starred, 0, 0, 5, 50, 20);
+    check("star()", fill_area(starred, gfx2d::NONZERO, 0), 5 * 50 * 20 * sin(PI / 5), 0.01);
+    var hexagon = gfx2d::Path {};
+    gfx2d::regular_polygon(hexagon, 0, 0, 10, 6);
+    check("hexagon", fill_area(hexagon, gfx2d::NONZERO, 0), 1.5 * sqrt(3.0) * 100, 0.01);
+    var rr = gfx2d::Path {};
+    gfx2d::rounded_rect(rr, 0, 0, 100, 60, 10);
+    check("rounded rect", fill_area(rr, gfx2d::NONZERO, 0), 6000 - (4 - PI) * 100, 0.5);
+
+    // The fringe adds about half a pixel's worth along the outline; a
+    // convex fill's, none.
+    check("convex fringe", fill_area(sq, gfx2d::NONZERO, 1), 10000, 0.5);
+    check("general fringe", fill_area(holed, gfx2d::NONZERO, 1), 7500 + 0.125 * 600, 1);
+
+    // The fringe goes outward: its outer edge lies outside the fill.
+    fn fringe_outside(p: const gfx2d::Path&, rule: i64) -> bool {
+        var pts: float2[>..<] = [];
+        var contours: gfx2d::Contour[>..<] = [];
+        gfx2d::flatten(p, gfx2d::IDENTITY, 0.01, pts, contours);
+        var v: gfx2d::TessVertex[>..<] = [];
+        var idx: u32[>..<] = [];
+        gfx2d::fill_triangles(pts, contours, rule, 1, v, idx);
+        for q in v {
+            if q.alpha == 0.0 && gfx2d::filled(gfx2d::winding_at(pts, contours, q.p), rule) { return false; }
+        }
+        true
+    }
+    print("fringe outward: convex ", fringe_outside(sq, gfx2d::NONZERO), ", holed ",
+          fringe_outside(holed, gfx2d::NONZERO), ", even-odd ", fringe_outside(same, gfx2d::EVEN_ODD),
+          ", star ", fringe_outside(starred, gfx2d::NONZERO));
+
+    print("contains: ", gfx2d::contains(holed, float2 { 10, 10 }), " ",
+          gfx2d::contains(holed, float2 { 50, 50 }), " ",
+          gfx2d::contains(same, float2 { 50, 50 }), " ",
+          gfx2d::contains(same, float2 { 50, 50 }, gfx2d::EVEN_ODD));
+
+    // Strokes.
+    var seg = gfx2d::Path {};
+    gfx2d::move_to(seg, 0, 0);
+    gfx2d::line_to(seg, 100, 0);
+    check("butt", stroke_area(seg, 5, gfx2d::JOIN_MITER, 0, []), 1000, 0.01);
+    check("square cap", stroke_area(seg, 5, gfx2d::JOIN_MITER, 2, []), 1100, 0.01);
+    check("round cap", stroke_area(seg, 5, gfx2d::JOIN_MITER, 1, []), 1000 + PI * 25, 0.5);
+    var corner = gfx2d::Path {};
+    gfx2d::move_to(corner, 0, 0);
+    gfx2d::line_to(corner, 100, 0);
+    gfx2d::line_to(corner, 100, 100);
+    check("miter join", stroke_area(corner, 5, gfx2d::JOIN_MITER, 0, []), 2000, 0.01);
+    check("bevel join", stroke_area(corner, 5, gfx2d::JOIN_BEVEL, 0, []), 2000 - 12.5, 0.01);
+    check("round join", stroke_area(corner, 5, gfx2d::JOIN_ROUND, 0, []), 2000 - 25 + PI * 25 / 4, 0.05);
+    // The other way round the corner: the joins are on the other side.
+    var left = gfx2d::Path {};
+    gfx2d::move_to(left, 0, 0);
+    gfx2d::line_to(left, 100, 0);
+    gfx2d::line_to(left, 100, -100);
+    check("left turn", stroke_area(left, 5, gfx2d::JOIN_MITER, 0, []), 2000, 0.01);
+    // A closed square's stroke: a frame 10 wide.
+    check("closed", stroke_area(sq, 5, gfx2d::JOIN_MITER, 0, []), 110 * 110 - 90 * 90, 0.01);
+    // A stroke crossing itself is drawn once where it does: with round
+    // joins and caps, it is every point within half its width of the
+    // line, which sampling finds.
+    let line_pts = [float2 { 0, 50 }, float2 { 100, 50 }, float2 { 50, 0 }, float2 { 50, 100 }];
+    var cross = gfx2d::Path {};
+    gfx2d::polygon(cross, line_pts, false);
+    var hits = 0;
+    for yi in -60..1060 {
+        for xi in -60..1060 {
+            let q = float2 { xi * 0.1 + 0.05, yi * 0.1 + 0.05 };
+            var near = false;
+            for i in 3 {
+                let a = line_pts[i];
+                let d = line_pts[i + 1] - a;
+                let t = clamp(dot(q - a, d) / dot(d, d), 0.0, 1.0);
+                if length(q - (a + d * float2 { t, t })) <= 5.0 { near = true; }
+            }
+            if near { hits++; }
+        }
+    }
+    check("self-crossing", stroke_area(cross, 5, gfx2d::JOIN_ROUND, 1, []), hits * 0.01, 3);
+    // Dashes: 10 on, 10 off along 100: five dashes of 10 by 10.
+    check("dashes", stroke_area(seg, 5, gfx2d::JOIN_MITER, 0, [10.0, 10.0]), 500, 0.01);
+    check("dashes, round caps", stroke_area(seg, 5, gfx2d::JOIN_MITER, 1, [10.0, 10.0]),
+          500 + 5 * PI * 25, 2);
+    // A dot is a round cap's circle.
+    var dot = gfx2d::Path {};
+    gfx2d::move_to(dot, 5, 5);
+    gfx2d::line_to(dot, 5, 5);
+    check("dot", stroke_area(dot, 5, gfx2d::JOIN_MITER, 1, []), PI * 25, 0.5);
+
+    // transform() moves every point.
+    var moved = gfx2d::Path {};
+    gfx2d::rect(moved, 0, 0, 10, 10);
+    gfx2d::transform(moved, gfx2d::mul(gfx2d::translation(5, 5), gfx2d::scaling(2)));
+    print("transformed: ", gfx2d::bounds(moved));
+}

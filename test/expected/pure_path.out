@@ -1,0 +1,32 @@
+elements: 5, pen at vec2<f32> { 10.0, 10.0 }, bounds gfx2d::Rect { 10.0, 10.0, 20.0, 30.0 }
+flattened: 1 contour, closed true, true points
+scaled up 10x: more points true
+square: ok
+circle: ok
+hole, nonzero: ok
+hole, even-odd: ok
+same-way hole, nonzero: ok
+same-way hole, even-odd: ok
+pentagram, nonzero: ok
+pentagram, even-odd: ok
+bow tie: ok
+star(): ok
+hexagon: ok
+rounded rect: ok
+convex fringe: ok
+general fringe: ok
+fringe outward: convex true, holed true, even-odd true, star true
+contains: true false true false
+butt: ok
+square cap: ok
+round cap: ok
+miter join: ok
+bevel join: ok
+round join: ok
+left turn: ok
+closed: ok
+self-crossing: ok
+dashes: ok
+dashes, round caps: ok
+dot: ok
+transformed: gfx2d::Rect { 5.0, 5.0, 20.0, 20.0 }

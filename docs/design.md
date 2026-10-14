@@ -331,6 +331,295 @@ approximation), so a drop shadow is also a single instance.
 ```goose
 enum PathEl {
     Move { p: float2 }, Line { p: float2 }, Quad { c: float2, p: float2 },
+    Cubic { c1: float2, c2: float2, p: float2 }, Close,
+}
+// The caller owns a path, and it is freed at the end of its scope.
+struct Path { els: PathEl[>..] = [] }
+
+fn move_to(p: Path&, x: f64, y: f64)   line_to   quad_to   cubic_to   close   clear
+fn arc(p: Path&, cx, cy, r[, ry], a0, a1)          // as cubics of at most a quarter turn
+fn rect / rounded_rect / circle / ellipse / polygon / regular_polygon / star(p: Path&, ...)
+fn transform(p: Path&, m: Affine)   bounds(p) -> Rect   contains(p, pt, rule) -> bool
+```
+
+From outside the namespace these are written `gfx2d::move_to(p, x, y)`,
+not `p.move_to(x, y)`. Goose looks up method-call syntax in the caller's
+namespace, not the argument type's (an "associated-namespace lookup" that
+Goose's namespaces design leaves for later).
+
+* **Flattening.** Bézier control points are transformed by the current
+  transform first (an affine transform maps a Bézier curve to the Bézier
+  curve of the mapped control points), and the curve is flattened in
+  pixels by Wang's formula to a 0.1 px tolerance, so zooming in adds
+  segments.
+* **Fill** (`fill(path, paint, rule)` with `NONZERO` or `EVEN_ODD`). A
+  single convex contour, detected automatically, becomes a fan, with its
+  outline moved in by half a pixel and a one-pixel fringe ramping alpha
+  from 1 to 0 across the true edge. That gives exact coverage, as nanovg
+  does. Any other fill (holes, self-intersection, several contours) is cut
+  into horizontal bands at every vertex's y and every crossing. Within a
+  band, sorted by x at its middle, the fill rule picks the spans, each
+  emitted as a trapezoid. The trapezoids tile the fill exactly, and an
+  outward fringe half a pixel wide (alpha ½ to 0) is added along each
+  contour on the side away from the fill. The side is found by testing
+  the winding number just beside one edge. So these fills come out about
+  ⅛ px per unit of outline larger than exact, with slightly crisper edges
+  than the analytic shapes.
+* **Stroke** (`stroke(path, width, paint)` or
+  `stroke(path, Stroke { width, join, cap, miter_limit, dash, dash_offset, pixels }, paint)`):
+  * The stroker makes one outline per open subpath and two per closed
+    one, and fills them by `NONZERO`. A stroke that crosses itself is
+    drawn once where it overlaps, so translucent strokes don't darken
+    there.
+  * Joins can be `MITER` (falling back to bevel past the limit), `ROUND`
+    or `BEVEL`. On the inner side of a join, the outline uses the point
+    where the two sides meet, and pivots through the vertex only when that
+    point would lie past either segment's end.
+  * Dashes cut the flattened line before stroking.
+  * A stroke is made in the space the path is drawn in, so it stretches
+    with the transform like a pen. With `pixels: true` its width is in
+    pixels instead.
+  * Strokes thinner than a pixel are drawn one pixel wide, with alpha
+    scaled by the width.
+* **Polygons:** `polygon(points, paint)`, `triangle`, `quad`,
+  `polyline(points, width, paint, cap, join)`, `polygon_outline`,
+  `regular_polygon`, `star`.
+* **Known limitation.** Every edge of the outline gets a fringe, including
+  edges inside the fill: the inner parts of a path or stroke where it
+  crosses itself. With an opaque paint that's invisible. With a
+  translucent one, faint lines show where a stroke crosses itself. The fix
+  is to put the fringe only on the stretches of edges that are fill
+  boundaries, which the band sweep already finds (the edges at span ends).
+* **Later:** retained meshes (`tessellate` once, draw every frame), user
+  triangle meshes with per-vertex colors and uvs, and SVG path data.
+
+Tessellation runs in Goose, into the frame's grow-shrink arrays, and is
+tested without a GPU in `test/pure/path.goose`. Those tests check areas by
+summing triangles, which is exact whatever way the fill was cut, under
+both rules, for holes, pentagrams, bow ties and every join and cap. They
+also check that the fringe lies outside the fill, since an area test
+can't tell which way a fringe faces.
+
+## Transforms as scopes
+
+```goose
+gfx2d::translate(400, 300) {
+    for i in 12 {
+        gfx2d::rotate(i * TAU / 12) {
+            gfx2d::rect(80, -4, 60, 8, gfx2d::hsv(i / 12.0, 0.8, 0.9));
+        };
+    }
+};
+```
+
+Each transform call multiplies onto the current matrix, runs the block and
+then restores the previous matrix. `gfx2d::push()` and `gfx2d::pop()` are
+available for code that doesn't fit into a block.
+
+### Complex: a gradient blended with a texture, stroked and clipped
+
+```goose
+let wood = gfx::load_texture("wood.png", gfx::LOAD_MIPS);
+
+let paint = gfx2d::Paint {
+    source: gfx2d::linear_gradient(float2 { 0, 0 }, float2 { 300, 200 },
+                                   [gfx2d::stop(0.0, gfx2d::rgb(0xFF8800)),
+                                    gfx2d::stop(0.6, gfx2d::rgb(0xCC2266)),
+                                    gfx2d::stop(1.0, gfx2d::rgba(0x2200AA, 0.8))]),
+    image: gfx2d::image_pattern(wood, gfx2d::scale(0.5, 0.5)),   // repeats, in local space
+    image_mode: gfx2d::IMAGE_MULTIPLY,      // gradient x texture
+    opacity: 0.9,
+};
+
+var star: gfx2d::Path = [];
+star.star(float2 { 150, 100 }, 5, 90, 40);   // path builders are functions over the array
+
+gfx2d::clip_rounded_rect(0, 0, 300, 200, 24) {
+    gfx2d::fill(star, paint);
+    gfx2d::stroke(star, gfx2d::Stroke { width: 4, join: gfx2d::JOIN_ROUND,
+                                        dash: [8, 4] }, gfx2d::WHITE);
+};
+```
+
+## Coordinates and frames
+
+* **Coordinates are pixels**, with the origin at the top left and y pointing
+  down, like the screen and texture coordinates in `gfx`.
+* **Scalar parameters are `f64`.** A Goose float variable is `f64` by
+  default and doesn't narrow to `f32` implicitly. Integers, `f32` and
+  `f64` all pass to an `f64` parameter, so `circle(x, y, r, c)` works
+  whatever types the caller's variables have. The library narrows to `f32`
+  internally. Structs that are GPU data, or that are built from
+  `float2`/`float4` (`Affine`, `Rect`, corner radii), stay `f32`.
+  `rect_of(x, y, w, h)` builds a `Rect` from any numbers.
+* **High-density displays.** `gfx` works in pixels and reports the mouse in
+  pixels. `gfx2d::set_scale(s)` (or `frame(clear, scale)`) adds a base scale
+  so that a program can draw in logical units, and hit testing divides the
+  scale back out.
+* **Canvases.** `begin(target: gfx::Texture, clear: Color)` draws into any
+  color target, and `begin(target)` draws over what is already there.
+  `gfx2d` opens and closes its own `gfx` passes, the same way `ui::render`
+  does. That lets it switch targets for layers and lets 2D drawing be mixed
+  with `ui` and with a program's own 3D passes in either order. A canvas
+  can request MSAA (`CanvasDesc { samples: 4 }`), which uses a multisampled
+  intermediate texture and a resolve.
+* **State** is global, as it is in `gfx`. That includes the current
+  transform, clip, default font, blend mode and opacity. All of it is reset
+  at `begin`.
+
+## Colors (`color.goose`)
+
+```goose
+struct Color { r: f32, g: f32, b: f32, a: f32 }   // sRGB-encoded, straight alpha, 0..1
+```
+
+* **Constructors:** `rgb(0xRRGGBB)`, `rgba(0xRRGGBB, a)`, `rgba8(r, g, b, a)`,
+  `rgbf(r, g, b)`, `hex("#ff8800cc")`, `gray(v)`, `hsv(h, s, v)`,
+  `hsl(h, s, l)`, `oklch(l, c, h)`, `from_linear(float4)`, and
+  `from_u32(0xAARRGGBB)`. Named constants include `BLACK`, `WHITE`,
+  `TRANSPARENT`, `RED` and the rest of the CSS basic set. A `css` table can
+  be added later.
+* **Conversions:** `to_linear`, `to_hsv`, `to_hsl`, `to_oklab`, `to_oklch`,
+  `to_u32`, `to_float4`, `premultiplied`.
+* **Manipulation:** `with_alpha`, `fade(c, k)`, `lighten`, `darken`,
+  `saturate`, `desaturate`, `rotate_hue`, `invert`, `grayscale` (luma),
+  `mix(a, b, t)` (OKLab by default, `mix_srgb` and `mix_linear` also
+  available), `blend_over(dst, src)`, `luminance`, `contrast_ratio` (WCAG)
+  and `readable_on(bg)` (black or white). Lightness changes are done in
+  OKLCh, so `lighten(c, 0.1)` produces a perceptually even step.
+* **Palettes:** `gradient_at(stops, t)` uses the same interpolation as the
+  GPU, and `palette(n, seed)` generates distinct hues by golden-angle
+  steps in OKLCh.
+
+Color math is all Goose, runs without a GPU, and is tested in `test/pure/`.
+
+**Blending space.** By default the library blends and interpolates
+gradients in sRGB, as browsers and most 2D APIs do, so results match what
+designers expect. A canvas flag `LINEAR_BLENDING` switches to an sRGB
+intermediate target (`RGBA8_SRGB`) for physically correct blending, and
+the interpolation space of a gradient is a separate per-gradient field
+(`SRGB`, `LINEAR` or `OKLAB`).
+
+## Paint
+
+A paint describes how each covered pixel is colored. The shape decides
+which pixels are covered.
+
+```goose
+struct Gradient {
+    kind: i32,                        // NONE, LINEAR, RADIAL, CONIC
+    p0: float2, p1: float2,           // linear: the ends; radial: center, focal point; conic: center
+    radius: f32, angle: f32,          // radial; conic
+    spread: i32,                      // PAD, REPEAT, REFLECT
+    space: i32,                       // INTERPOLATE_SRGB, LINEAR or OKLAB
+    stops: Stop[..16],                // inline, up to MAX_STOPS
+}
+
+struct Paint {
+    color: Color = WHITE,             // the source, or a tint multiplying the gradient
+    gradient: Gradient = { .. },      // kind NONE: the color alone
+    image: Image = { .. },            // texture, placement, source rect, wrap, filter; none by default
+    image_mode: i32 = 0,              // IMAGE_MULTIPLY; also REPLACE, ADD, MASK
+    opacity: f32 = 1.0,
+    blend: i32 = 0,                   // BLEND_NORMAL, ADD, MULTIPLY, REPLACE
+    space: i32 = 0,                   // SPACE_LOCAL: moves with the shape; or SPACE_SCREEN
+}
+```
+
+This is a struct rather than an enum of sources, so a struct literal can
+set just the fields it needs, as in `Paint { gradient: g, opacity: 0.5 }`.
+A `Gradient` holds its stops inline (`Stop[..16]`), so a `Paint` is a flat
+value with no allocation.
+
+* **The shader evaluates paint in this order:** the source (the color, or
+  the gradient tinted by the color), then the image sample combined with
+  it by `image_mode`, then `opacity`, then the shape's coverage, and
+  finally the result is blended into the target by `blend`.
+* **Gradients** have up to 16 stops, a spread mode (`PAD`, `REPEAT`,
+  `REFLECT`) and an interpolation space. They're baked on the CPU
+  (`paint.goose`, testable without a GPU) into rows of a 256-wide *ramp
+  atlas* texture, stored premultiplied so filtering doesn't darken where
+  alpha changes. Gradients in the same frame with the same stops and space
+  share a row. The paint carries only a row index and the gradient's
+  geometry. A radial gradient's focal point is clamped to inside its
+  circle.
+* **Images** carry a `gfx::Texture`, a placement (an `Affine` from the
+  image's pixels into the paint's space), an optional source rectangle in
+  pixels (sprite sheets), a wrap mode (`CLAMP`, `REPEAT`, `MIRROR`,
+  `DECAL`) and a filter (`LINEAR`, `NEAREST`). A whole texture wraps by its
+  sampler. A part of one wraps in the shader, inset half a texel so that
+  its neighbors never bleed in, and mip level comes from the unwrapped
+  coordinates so the seam doesn't drop to the smallest mip. The default
+  mode, `IMAGE_MULTIPLY` with a white color, draws the image as it is.
+* **Paint records** are deduplicated against the last one added, so a loop
+  drawing many shapes with one paint uploads it once. A shape drawn with a
+  `Color` uses paint 0, "the instance's color alone", and needs no record.
+* **Blend modes on a paint** are the ones `gfx`'s fixed-function blending
+  provides, with coverage and opacity folded into what the shader outputs:
+  * `NORMAL` is `gfx::BLEND_PREMULTIPLIED`, with the shader outputting
+    premultiplied color times coverage.
+  * `ADD` is `gfx::BLEND_ADD`, with coverage in alpha.
+  * `MULTIPLY` is `gfx::BLEND_MULTIPLY`, with the shader outputting
+    `mix(1, color, alpha * coverage)` so that edges stay anti-aliased.
+  * `REPLACE` is `gfx::BLEND_NONE`, with hard edges.
+
+  Each of these is one pipeline variant.
+* **Other blend modes need a layer.** `SCREEN`, `ERASE` (destination-out),
+  the other Porter-Duff operators, `OVERLAY`, `DARKEN`, `LIGHTEN` and
+  `COLOR_DODGE` can't be expressed with those blend factors. They're
+  available on layers (see below), where a composite pass samples both the
+  layer and a copy of the destination and blends in the shader. This costs
+  an extra pass per layer.
+* **Shorthands:** every shape takes a `Color` or a `Paint` in the same
+  position (the parameter is generic, so there's one function per shape,
+  not two). `solid(c)`, `linear(x0, y0, x1, y1, c0, c1)`,
+  `radial(cx, cy, r, inner, outer)`, `pattern(texture)`, `paint(gradient)`,
+  `paint(image)`, `with_opacity` and `with_blend` build the common paints in
+  one call.
+* **Batches** are keyed by blend mode and image (texture and sampler). A
+  shape without an image fits any batch of its blend mode, and a batch
+  without an image takes the first image that comes, so solid shapes
+  between sprites from one sheet don't break the batch. The ramp atlas is
+  always bound, so gradients never break a batch.
+
+## Shapes (`gfx2d.goose`)
+
+Each primitive has a fill form and a stroke form, and each form accepts
+either a `Color` or a `Paint`:
+
+| | fill | stroke |
+|---|---|---|
+| rectangle | `rect(x, y, w, h, paint)` | `rect_outline(x, y, w, h, width, paint)` |
+| rounded rectangle | `rounded_rect(x, y, w, h, r, paint)`, per-corner `float4` radii | `rounded_rect_outline(...)` |
+| circle | `circle(cx, cy, r, paint)` | `circle_outline(cx, cy, r, width, paint)` |
+| ellipse | `ellipse(cx, cy, rx, ry, paint)` | `ellipse_outline(...)` |
+| arc, pie, ring | `pie(c, r, a0, a1, paint)`, `ring(c, r0, r1, paint)` | `arc(c, r, a0, a1, width, cap, paint)` |
+| line | | `line(x0, y0, x1, y1, width, paint)`, with caps |
+| triangle, quad | `triangle(a, b, c, paint)`, `quad(a, b, c, d, paint)` | via paths |
+| polygon | `polygon(points, paint)`, `regular_polygon(c, n, r, paint)` | `polyline(points, width, paint)`, `polygon_outline` |
+| image | `image(tex, x, y)`, `image(tex, dst_rect, src_rect)`, `nine_slice(...)` (seamless: inner edges are hard, half-open by pixel center) | |
+| shadow | `box_shadow(x, y, w, h, r, blur, color)` | |
+
+Overloads also accept `float2` points and a `Rect { x, y, w, h }` struct, so
+the same call can be written with whichever types the caller already has.
+
+**Analytic primitives.** Rectangles, rounded rectangles, circles,
+ellipses, arcs, pies, rings, lines and capsules aren't tessellated. Each is
+one instance of a quad that bounds the shape, expanded by a pixel for
+anti-aliasing. The fragment shader evaluates the shape's signed distance
+and turns it into coverage. A stroke of one of these shapes is the same
+instance with `|d| - width/2`, so outlines are as cheap as fills and are
+centered on the geometry (inner and outer alignment are flags). For an
+ellipse, the shader uses the first-order approximation `f / |∇f|`, which
+is accurate within the anti-aliasing band. `box_shadow` uses the
+closed-form Gaussian-blurred rounded rectangle (as in Evan Wallace's
+approximation), so a drop shadow is also a single instance.
+
+## Paths and polygons (`path.goose`)
+
+```goose
+enum PathEl {
+    Move { p: float2 }, Line { p: float2 }, Quad { c: float2, p: float2 },
     Cubic { c1: float2, c2: float2, p: float2 }, Arc { ... }, Close,
 }
 // A path is a plain array, so the caller owns it and it is freed at the end of its scope.
@@ -622,8 +911,10 @@ Ordered by value to typical users. The first group belongs in v1.
 2. **Paint** (done): gradients with the ramp atlas, image patterns and
    image modes, the four fixed-function blend modes, images and sprites,
    nine-slice, and `examples/paint.goose`.
-3. **Paths**: flattening, convex and general tessellation, the fringe,
-   stroker with joins, caps and dashes, retained meshes, polygons.
+3. **Paths** (done): flattening, convex and band tessellation under both
+   fill rules, the fringe, the stroker with joins, caps and dashes,
+   polygons and polylines, the mesh pipeline, and `examples/paths.goose`.
+   Retained meshes and SVG path data are left for later.
 4. **Text**: the stb_truetype layer, the vendored Inter subset, SDF atlas,
    measure and layout, and outline and glow.
 5. **Clip and layers**: rectangle and analytic clips, R8 mask clips,
