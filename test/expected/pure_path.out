@@ -46,6 +46,9 @@ direct square dot: ok
 direct ring: ok
 direct self-crossing: ok
 direct sharp zigzag: at least the union true
+mesh: 32 triangles, the same again true, the fill's area true
+mesh stroke: ok
+mesh at scale 2: true, scale 2.0; a hairline's alpha 0.25; drawn once where it crosses true
 zigzag in pieces: 7 groups; no overlap true, union true
 wave in pieces: 9 groups; no overlap true
 circle in pieces: true groups; no overlap true, the ring's area true

@@ -1354,6 +1354,130 @@ fn stroke_triangles(pts: const float2[:], contours: const Contour[:], half: f32,
     }
 }
 
+// --- strokes and meshes ----------------------------------------------------------------
+
+// Pixels the curves of paths may be off by. Flattened points lie on the
+// curve, so a flattened outline is inside it, by up to this much: small
+// enough that the area lost is a fraction of what antialiasing blurs.
+let TOLERANCE: f32 = 0.1;
+
+// Scratch for flattening and stroking, grown once.
+var flat_pts: float2[>..<] = [];
+var flat_contours: Contour[>..<] = [];
+var dash_pts: float2[>..<] = [];
+var dash_cs: Contour[>..<] = [];
+var outline_pts: float2[>..<] = [];
+var outline_cs: Contour[>..<] = [];
+
+// The flattened contours stroked as `s` says, `half` their half width in
+// their units, dashed by s.dash (times dash_scale, for a pattern in other
+// units), with a fringe `fringe` wide (0: none), as triangles appended to
+// out and idx: straight from the lines (stroke_triangles), or, with
+// `once`, outlined and filled by the nonzero rule, so that the stroke is
+// drawn once where it overlaps itself, as a translucent paint needs.
+fn stroke_contours(pts: const float2[:], contours: const Contour[:], s: Stroke, half: f32,
+                   dash_scale: f32, tolerance: f32, fringe: f32, once: bool,
+                   out: TessVertex[>..<]&, idx: u32[>..<]&) {
+    fn emit(p: const float2[:], cs: const Contour[:]) {
+        if !once {
+            stroke_triangles(p, cs, half, s.join, s.cap, s.miter_limit, tolerance, fringe, out, idx);
+            return;
+        }
+        outline_pts.resize(0);
+        outline_cs.resize(0);
+        stroke_outline(p, cs, half, s.join, s.cap, s.miter_limit, tolerance, outline_pts, outline_cs);
+        // Each piece of the outline tessellated alone (stroke_outline's
+        // STROKE_CHUNK).
+        var a = 0;
+        while a < outline_cs.len {
+            var b = a + 1;
+            while b < outline_cs.len && outline_cs[b].group == outline_cs[a].group { b++; }
+            fill_triangles(outline_pts, outline_cs[a..b], NONZERO, fringe, out, idx);
+            a = b;
+        }
+    }
+    if s.dash.len == 0 {
+        emit(pts, contours);
+        return;
+    }
+    var pattern: f32[..8] = [];
+    for d in s.dash { pattern.push(d * dash_scale); }
+    dash_pts.resize(0);
+    dash_cs.resize(0);
+    dash_contours(pts, contours, pattern, s.dash_offset * dash_scale, dash_pts, dash_cs);
+    emit(dash_pts, dash_cs);
+}
+
+// The path's fill by `rule`, as triangles in the path's own space, for
+// drawing at `scale` pixels a unit: the curves flattened as that needs,
+// with a fringe `fringe_px` pixels wide there (0: none).
+fn fill_mesh(p: const Path&, rule: i64, scale: f32, fringe_px: f32, out: TessVertex[>..<]&,
+             idx: u32[>..<]&) {
+    let px = 1.0 / max(scale, 0.000001);
+    flat_pts.resize(0);
+    flat_contours.resize(0);
+    flatten(p, IDENTITY, TOLERANCE * px, flat_pts, flat_contours);
+    fill_triangles(flat_pts, flat_contours, rule, fringe_px * px, out, idx);
+}
+
+// The path's stroke as `s` says, the same way (a stroke in pixels is that
+// wide at `scale`); `once` as stroke_contours'. The alpha to draw it at:
+// under 1 for a stroke thinner than a pixel, which is drawn a pixel wide.
+fn stroke_mesh(p: const Path&, s: Stroke, scale: f32, fringe_px: f32, once: bool,
+               out: TessVertex[>..<]&, idx: u32[>..<]&) -> f32 {
+    let sc = max(scale, 0.000001);
+    let px = 1.0 / sc;
+    let width_px = abs(s.width) * (if s.pixels { 1.0 } else { sc });
+    let k = min(width_px, 1.0);
+    let half = max(width_px, 1.0) * 0.5 * px;
+    flat_pts.resize(0);
+    flat_contours.resize(0);
+    flatten(p, IDENTITY, TOLERANCE * px, flat_pts, flat_contours);
+    stroke_contours(flat_pts, flat_contours, s, half, if s.pixels { px } else { 1.0 }, TOLERANCE * px,
+                    fringe_px * px, once, out, idx);
+    k
+}
+
+// A path tessellated once, to be drawn every frame with gfx2d.goose's
+// draw(mesh, c) under any transform: its triangles in the path's own
+// space, made for `scale` pixels a unit (the curves are flattened and the
+// fringe sized for that scale: drawn at another, the edges come out
+// softer or harder than a pixel, and at a very different one, make it
+// again), and the alpha to draw it at (under 1 for a stroke thinner than
+// a pixel, drawn a pixel wide).
+struct Mesh {
+    scale: f32 = 1.0,
+    alpha: f32 = 1.0,
+    indices: u32[],
+    vertices: TessVertex[>..] = [],
+}
+
+fn mesh_of(out: const TessVertex[:], idx: const u32[:], scale: f32, alpha: f32) -> Mesh {
+    var m = Mesh { scale: scale, alpha: alpha, indices: idx };
+    for v in out { m.vertices.push(v); }
+    return m;
+}
+
+// The path filled by `rule`, tessellated once for drawing at `scale`
+// pixels a unit, with an antialiasing fringe unless `antialias` is false
+// (for a multisampled frame, which needs none).
+fn tessellate(p: const Path&, rule: i64 = NONZERO, scale: f64 = 1.0, antialias: bool = true) -> Mesh {
+    var out: TessVertex[>..<] = [];
+    var idx: u32[>..<] = [];
+    fill_mesh(p, rule, scale as f32, if antialias { 1.0 } else { 0.0 }, out, idx);
+    return mesh_of(out, idx, scale as f32, 1.0);
+}
+
+// The path's stroke as `s` says, the same; with `once`, drawn once where
+// it overlaps itself, as a translucent paint needs (slower to make).
+fn tessellate_stroke(p: const Path&, s: Stroke, scale: f64 = 1.0, once: bool = false,
+                     antialias: bool = true) -> Mesh {
+    var out: TessVertex[>..<] = [];
+    var idx: u32[>..<] = [];
+    let alpha = stroke_mesh(p, s, scale as f32, if antialias { 1.0 } else { 0.0 }, once, out, idx);
+    return mesh_of(out, idx, scale as f32, alpha);
+}
+
 // The contours cut into dashes by an on/off pattern starting `offset` into
 // it, as open contours appended to out_pts and out_contours.
 fn dash_contours(pts: const float2[:], contours: const Contour[:], pattern: const f32[:],

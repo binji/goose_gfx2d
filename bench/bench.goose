@@ -226,6 +226,10 @@ fn path_fills() {
 // One large outline: 5,000 points round a noisy blob, not convex, not
 // crossing itself (a coastline, a country on a map).
 fn big_path() {
+    let p = big_blob();
+    gfx2d::fill(p, gfx2d::rgba(0x3366CC, 0.5));
+}
+fn big_blob() -> gfx2d::Path {
     seed(9);
     var p = gfx2d::Path {};
     for i in 5000 {
@@ -236,7 +240,18 @@ fn big_path() {
         if i == 0 { gfx2d::move_to(p, x, y); } else { gfx2d::line_to(p, x, y); }
     }
     gfx2d::close(p);
-    gfx2d::fill(p, gfx2d::rgba(0x3366CC, 0.5));
+    return p;
+}
+
+// The same outline tessellated once, on the first frame, and drawn as a
+// mesh after: what a map's or a chart's static shapes cost a frame.
+var big_mesh = gfx2d::Mesh { indices: [] };
+fn big_path_retained(frame: i64) {
+    if frame == 0 {
+        let p = big_blob();
+        big_mesh = gfx2d::tessellate(p);
+    }
+    gfx2d::draw(big_mesh, gfx2d::rgba(0x3366CC, 0.5));
 }
 
 // 150 random points across the target, closed: about 5,000 crossings,
@@ -494,6 +509,7 @@ fn main() {
     run("sprites_alternating") { f => sprites_alternating(); };
     run("path_fills") { f => path_fills(); };
     run("big_path") { f => big_path(); };
+    run("big_path_retained") { f => big_path_retained(f); };
     run("self_crossing") { f => self_crossing(); };
     run("chart") { f => chart(); };
     run("chart_translucent") { f => chart_translucent(); };

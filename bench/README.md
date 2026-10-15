@@ -56,6 +56,7 @@ where it shows:
 | `sprites_alternating` | the worst batching: a draw call per sprite |
 | `path_fills` | many small paths: convex (fan) and not (band tessellation) |
 | `big_path` | one large outline: band tessellation at scale |
+| `big_path_retained` | the same as a mesh made once: what drawing a retained mesh costs |
 | `self_crossing` | crossings: the band sweep's splitting at intersections |
 | `chart` | long polylines, opaque: strokes emitted straight from the lines |
 | `chart_translucent` | the same half transparent: the stroker's outlines and the tessellation of long ones |

@@ -107,6 +107,18 @@ fn main() {
     px = gfx::read_pixels(target);
     print("gradient fill: ", px[(20 * W + 15) * 4] < 20, " ", px[(20 * W + 105) * 4] > 235, " hole ", at(60, 60));
 
+    // A mesh made once draws as the path does, under the transform it is
+    // drawn under.
+    let mesh = gfx2d::tessellate(holed, gfx2d::EVEN_ODD);
+    gfx2d::draw_into(target, gfx2d::BLACK) {
+        gfx2d::translate(3, 2) { gfx2d::fill(holed, white, gfx2d::EVEN_ODD); };
+    };
+    px = gfx::read_pixels(target);
+    let by_fill = copy(px);
+    gfx2d::draw_into(target, gfx2d::BLACK) { gfx2d::translate(3, 2) { gfx2d::draw(mesh, white); }; };
+    px = gfx::read_pixels(target);
+    print("mesh: the fill's pixels ", px == by_fill, ", ", gfx2d::stats().triangles, " triangles");
+
     // Shapes and paths keep the order they were drawn in.
     gfx2d::draw_into(target, gfx2d::BLACK) {
         gfx2d::rect(0, 0, 20, 20, gfx2d::RED);

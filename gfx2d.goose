@@ -1183,19 +1183,9 @@ fn nine_slice_with(t: gfx::Texture, dst: Rect, src: Rect, insets: float4, tint, 
 // Fills and strokes of paths (path.goose), and the shapes made of straight
 // lines: polygons, polylines, triangles, regular polygons and stars. They
 // are tessellated each time they are drawn, into triangles with an
-// antialiasing fringe, in pixels.
+// antialiasing fringe, in pixels; or once, into a Mesh (path.goose's
+// tessellate), drawn with draw().
 
-// Pixels the curves of paths may be off by. Flattened points lie on the
-// curve, so a flattened outline is inside it, by up to this much: small
-// enough that the area lost is a fraction of what antialiasing blurs.
-let TOLERANCE: f32 = 0.1;
-
-var flat_pts: float2[>..<] = [];
-var flat_contours: Contour[>..<] = [];
-var dash_pts: float2[>..<] = [];
-var dash_cs: Contour[>..<] = [];
-var outline_pts: float2[>..<] = [];
-var outline_cs: Contour[>..<] = [];
 var tess_out: TessVertex[>..<] = [];
 var tess_idx: u32[>..<] = [];
 
@@ -1207,30 +1197,35 @@ fn pixel_scale() -> f32 { sqrt(abs(determinant(state.transform))) }
 
 var warned_complex = false;
 
-// tess_out and tess_idx, in pixels, as a mesh painted with c, its alpha
-// multiplied by k.
-fn add_mesh(c, k: f32) {
+// Triangles as a mesh painted with c, its alpha multiplied by k: in pixels,
+// or (`local`) in the current transform's space, which is the paint's.
+fn add_mesh(verts: const TessVertex[:], tris: const u32[:], c, k: f32, local: bool) {
     if tess_gave_up && !warned_complex {
         write_stderr("gfx2d: a path too complex to fill whole (millions of crossings) was drawn in part\n");
         warned_complex = true;
     }
     tess_gave_up = false;
-    if tess_idx.len == 0 { return; }
+    if tris.len == 0 { return; }
     let key = paint_key(c);
-    let inv, ok = invert(state.transform);
+    let m = state.transform;
+    let inv, ok = invert(m);
     let base = mesh_vertices.len as u32;
     fn byte(x: f32) -> u8 { (saturate(x) * 255.0 + 0.5) as u8 }
     let r = byte(key.color.x);
     let g = byte(key.color.y);
     let b = byte(key.color.z);
-    for v in tess_out {
-        mesh_vertices.push(MeshVertex { pos: v.p, user: if ok { apply(inv, v.p) } else { v.p },
-                                        color: [r, g, b, byte(key.color.w * v.alpha * k)],
-                                        paint: key.paint });
+    for v in verts {
+        let color: u8[4] = [r, g, b, byte(key.color.w * v.alpha * k)];
+        if local {
+            mesh_vertices.push(MeshVertex { pos: apply(m, v.p), user: v.p, color: color, paint: key.paint });
+        } else {
+            mesh_vertices.push(MeshVertex { pos: v.p, user: if ok { apply(inv, v.p) } else { v.p },
+                                            color: color, paint: key.paint });
+        }
     }
     let first = mesh_indices.len;
-    for i in tess_idx { mesh_indices.push(base + i); }
-    batch(BATCH_MESH, first, tess_idx.len, key);
+    for i in tris { mesh_indices.push(base + i); }
+    batch(BATCH_MESH, first, tris.len, key);
 }
 
 // The flattened contours in flat_pts, in pixels, filled.
@@ -1238,7 +1233,7 @@ fn fill_flat(c, rule: i64) {
     tess_out.resize(0);
     tess_idx.resize(0);
     fill_triangles(flat_pts, flat_contours, rule, fringe(), tess_out, tess_idx);
-    add_mesh(c, 1.0);
+    add_mesh(tess_out, tess_idx, c, 1.0, false);
 }
 
 // The path filled by `rule`, NONZERO or EVEN_ODD.
@@ -1276,62 +1271,33 @@ fn stroke_opaque(p: Paint) -> bool {
 fn stroke(p: const Path&, s: Stroke, c) {
     guard drawing();
     let scale = if s.pixels { 1.0 } else { max(pixel_scale(), 0.000001) };
-    // Pixels in the stroke's space.
-    let px = 1.0 / scale;
     // Thinner than a pixel: a pixel wide, as faint as it is thin.
-    let width_px = abs(s.width) * scale;
-    let k = min(width_px, 1.0);
-    let half = max(width_px, 1.0) * 0.5 * px;
-    flat_pts.resize(0);
-    flat_contours.resize(0);
-    flatten(p, if s.pixels { state.transform } else { IDENTITY }, TOLERANCE * px, flat_pts,
-            flat_contours);
-    let dashed = s.dash.len > 0;
-    if dashed {
-        dash_pts.resize(0);
-        dash_cs.resize(0);
-        dash_contours(flat_pts, flat_contours, s.dash, s.dash_offset, dash_pts, dash_cs);
-    }
-    if k >= 1.0 && stroke_opaque(c) {
-        tess_out.resize(0);
-        tess_idx.resize(0);
-        if dashed {
-            stroke_triangles(dash_pts, dash_cs, half, s.join, s.cap, s.miter_limit, TOLERANCE * px,
-                             fringe() * px, tess_out, tess_idx);
-        } else {
-            stroke_triangles(flat_pts, flat_contours, half, s.join, s.cap, s.miter_limit,
-                             TOLERANCE * px, fringe() * px, tess_out, tess_idx);
-        }
-        if !s.pixels {
-            for &q in tess_out { q.p = apply(state.transform, q.p); }
-        }
-        add_mesh(c, k);
-        return;
-    }
-    outline_pts.resize(0);
-    outline_cs.resize(0);
-    if dashed {
-        stroke_outline(dash_pts, dash_cs, half, s.join, s.cap, s.miter_limit, TOLERANCE * px,
-                       outline_pts, outline_cs);
-    } else {
-        stroke_outline(flat_pts, flat_contours, half, s.join, s.cap, s.miter_limit,
-                       TOLERANCE * px, outline_pts, outline_cs);
-    }
-    if !s.pixels {
-        for &q in outline_pts { q = apply(state.transform, q); }
-    }
-    // Each piece of the outline tessellated alone (stroke_outline's
-    // STROKE_CHUNK).
+    let k = min(abs(s.width) * scale, 1.0);
+    let once = !(k >= 1.0 && stroke_opaque(c));
     tess_out.resize(0);
     tess_idx.resize(0);
-    var a = 0;
-    while a < outline_cs.len {
-        var b = a + 1;
-        while b < outline_cs.len && outline_cs[b].group == outline_cs[a].group { b++; }
-        fill_triangles(outline_pts, outline_cs[a..b], NONZERO, fringe(), tess_out, tess_idx);
-        a = b;
+    if s.pixels {
+        // In pixels, under the transform, so the width is the same whatever
+        // it does.
+        flat_pts.resize(0);
+        flat_contours.resize(0);
+        flatten(p, state.transform, TOLERANCE, flat_pts, flat_contours);
+        stroke_contours(flat_pts, flat_contours, s, max(abs(s.width), 1.0) * 0.5, 1.0, TOLERANCE,
+                        fringe(), once, tess_out, tess_idx);
+        add_mesh(tess_out, tess_idx, c, k, false);
+    } else {
+        stroke_mesh(p, s, scale, fringe(), once, tess_out, tess_idx);
+        add_mesh(tess_out, tess_idx, c, k, true);
     }
-    add_mesh(c, k);
+}
+
+// A mesh (path.goose's tessellate) drawn under the current transform,
+// painted with c. It was made for mesh.scale pixels a unit: under a
+// transform of another scale its edges come out softer or harder than a
+// pixel.
+fn draw(m: const Mesh&, c) {
+    guard drawing();
+    add_mesh(m.vertices, m.indices, c, m.alpha, true);
 }
 
 // Through the points, closed, filled by the nonzero rule.

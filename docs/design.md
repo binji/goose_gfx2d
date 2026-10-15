@@ -426,8 +426,13 @@ Goose's namespaces design leaves for later).
 * **SVG path data** (`svg_path`) and `warp` (every point of a path through
   a function) came with the Goose logo example. Elliptical arcs aren't
   parsed.
-* **Later:** retained meshes (`tessellate` once, draw every frame), and
-  user triangle meshes with per-vertex colors and uvs.
+* **Retained meshes:** `tessellate(path, rule, scale)` and
+  `tessellate_stroke(path, stroke, scale)` make a `Mesh` once, in the
+  path's own space with the curves flattened and the fringe sized for
+  `scale` pixels a unit, and `draw(mesh, paint)` draws it every frame
+  under the current transform. Its vertices are still uploaded each frame;
+  keeping them on the GPU is later work.
+* **Later:** user triangle meshes with per-vertex colors and uvs.
 
 Tessellation runs in Goose, into the frame's grow-shrink arrays, and is
 tested without a GPU in `test/pure/path.goose`. Those tests check areas by

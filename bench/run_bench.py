@@ -37,6 +37,7 @@ CASES = {
     "sprites_alternating": "2,000 sprites, two textures taking turns",
     "path_fills": "1,000 star paths and 1,000 circle paths, filled",
     "big_path": "one 5,000-point noisy outline, filled",
+    "big_path_retained": "the same tessellated once and drawn as a mesh",
     "self_crossing": "150 random points, about 5,000 crossings, even-odd",
     "chart": "20 polylines of 1,000 points, round joins",
     "chart_translucent": "the same half transparent: outlined and swept",

@@ -94,7 +94,8 @@ and how to check it. Strike items out as they land.
    *Check:* `pure_path`'s stroke areas against the new emitter, and the
    `chart` and `dashed` cases.
 
-9. **Retained meshes.** A path drawn every frame is flattened and
+9. ~~**Retained meshes.**~~ Done (indexed: a `u32[]` beside the vertex
+   tail; a struct holds one resizable). A path drawn every frame is flattened and
    tessellated every frame. *Change:* `tessellate(path, …) -> Mesh`
    (vertices, indices, the transform it was made under) and
    `draw(mesh, c)`, drawn under the current transform; valid while the

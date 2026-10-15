@@ -131,6 +131,7 @@ struct Paint { color, gradient: Gradient, image: Image, image_mode, opacity, ble
 | `fill(path, c, rule = NONZERO)` | `NONZERO` or `EVEN_ODD`: holes and self-intersections are handled |
 | `stroke(path, width, c)`, `stroke(path, Stroke { width, join, cap, miter_limit, dash, dash_offset, pixels }, c)` | joins `JOIN_MITER`, `ROUND`, `BEVEL`; up to 8 dash lengths; `pixels`: width in pixels under any transform |
 | `polygon(points, c)`, `triangle`, `quad`, `polyline(points, width, c, cap, join)`, `polygon_outline`, `regular_polygon(…, c)`, `star(…, c)` | shortcuts |
+| `tessellate(path, rule, scale, antialias) -> Mesh`, `tessellate_stroke(path, Stroke, scale, once, antialias)`, `draw(mesh, c)` | a path tessellated once, for `scale` pixels a unit, and drawn every frame under the current transform; `once` for a stroke a translucent paint will draw |
 
 ### Text (`text.goose`)
 
@@ -298,7 +299,8 @@ python bench/run_bench.py --goose …                       # bench/results.md
   driver.
 * **Paths:** a fringe only on the stretches of edges that are fill
   boundaries (faint lines show inside a translucent stroke's
-  self-crossings); retained meshes; SVG elliptical arcs.
+  self-crossings); retained meshes kept on the GPU, in a buffer of
+  their own, rather than uploaded each frame; SVG elliptical arcs.
 * **Text:** bitmap glyphs for small and pixel-art text; glow; HarfBuzz
   shaping.
 * **Layers:** a color matrix filter; layers the size of their contents;

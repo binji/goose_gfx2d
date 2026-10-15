@@ -266,6 +266,24 @@ fn main() {
     print("direct sharp zigzag: at least the union ",
           direct_area(zag, 5, gfx2d::JOIN_MITER, 0, [], 1) >= stroke_area(zag, 5, gfx2d::JOIN_MITER, 0, []) - 0.01);
 
+    // Meshes: a path tessellated once, the same each time, covering what
+    // its fill or stroke does.
+    let mesh = gfx2d::tessellate(starred, gfx2d::NONZERO, 1.0);
+    let again = gfx2d::tessellate(starred, gfx2d::NONZERO, 1.0);
+    print("mesh: ", mesh.indices.len / 3, " triangles, the same again ",
+          mesh.indices == again.indices && mesh.vertices.len == again.vertices.len, ", the fill's area ",
+          abs(covered(mesh.vertices, mesh.indices) - fill_area(starred, gfx2d::NONZERO, 1)) < 0.01);
+    let stroked = gfx2d::tessellate_stroke(corner, gfx2d::Stroke { width: 10 }, 1.0);
+    check("mesh stroke", covered(stroked.vertices, stroked.indices), 2000, 0.5);
+    // Made for twice the scale, the fringe is half as wide in the path's
+    // units, and the area the same; a hairline's alpha is its width.
+    let fine = gfx2d::tessellate_stroke(corner, gfx2d::Stroke { width: 10 }, 2.0);
+    let hair = gfx2d::tessellate_stroke(corner, gfx2d::Stroke { width: 0.25 }, 1.0);
+    let once = gfx2d::tessellate_stroke(cross, gfx2d::Stroke { width: 10, join: gfx2d::JOIN_ROUND as i32, cap: 1 }, 1.0, true, false);
+    print("mesh at scale 2: ", abs(covered(fine.vertices, fine.indices) - 2000) < 0.5, ", scale ", fine.scale,
+          "; a hairline's alpha ", hair.alpha, "; drawn once where it crosses ",
+          abs(covered(once.vertices, once.indices) - hits * 0.01) < 3);
+
     // A long stroke is outlined in pieces, each tessellated alone, cut across
     // the middle of segments so that together they cover the stroke exactly
     // once.
