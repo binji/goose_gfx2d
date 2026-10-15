@@ -1,7 +1,7 @@
 // The Goose logo, from its SVG: the paths' data parsed by svg_path, the
 // goose's speed lines rippling and its head bobbing by warping the path a
 // little every frame, and now and then a rainbow shine sweeping across it,
-// with a glow.
+// with a glow; and its name centered below it.
 //
 // goose_logo.svg is the Goose repository's vscode/fileicons/goose-light-icon.svg
 // (a potrace trace, Apache License 2.0, as Goose).
@@ -54,7 +54,7 @@ fn animate(logo: gfx2d::Path&, t: f64) {
 }
 
 let SHINE_EVERY = 4.0;      // seconds
-let SHINE_FOR = 1.3;
+let SHINE_FOR = 0.9;
 
 // The rainbow band across the logo at u, from 0 (before its left end) to 1
 // (past its right): a gradient across the band, transparent at its edges,
@@ -108,7 +108,12 @@ fn main() {
         let strength = sin(u * PI);
 
         let size = gfx::screen_size();
-        let fit = gfx2d::fit(bounds, gfx2d::rect_of(60, 60, size.x - 120, size.y - 120), gfx2d::FIT_CONTAIN);
+        // The logo above, its name below: the name's size follows the
+        // window's, and the logo fits what is left.
+        let name_size = size.y * 0.13;
+        let fit = gfx2d::fit(bounds, gfx2d::rect_of(60, 40, size.x - 120, size.y - 80 - name_size * 1.4),
+                             gfx2d::FIT_CONTAIN);
+        let placed = gfx2d::transformed_bounds(fit, bounds);
         gfx2d::frame(gfx2d::rgb(0x101018)) {
             gfx2d::rect(0, 0, size.x, size.y, gfx2d::radial(size.x / 2, size.y / 2, size.x * 0.6,
                                                             gfx2d::rgb(0x23233A), gfx2d::rgb(0x101018)));
@@ -129,6 +134,9 @@ fn main() {
                     };
                 }
             };
+            gfx2d::text(size.x / 2, placed.y + placed.h + name_size * 0.15, "Goose",
+                        gfx2d::TextStyle { size: name_size as f32, align: gfx2d::ALIGN_CENTER },
+                        gfx2d::rgb(0xF5F1E8));
         };
         drawn++;
     }
