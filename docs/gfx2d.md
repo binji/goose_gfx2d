@@ -227,8 +227,12 @@ Goose program ──► gfx2d (Goose: shapes, paints, paths, text layout, passes
   * anything else is cut into bands at vertices and crossings, with spans
     by the fill rule merged into trapezoids while their edges continue,
     plus an outward half-pixel fringe;
-  * strokes become outlines, filled by `NONZERO` in pieces of about 16
-    segments.
+  * an opaque stroke is emitted straight from the line: a quad a segment,
+    a fan at each join's outer corner, caps, and a fringe along the edges,
+    since where it overlaps itself the second drawing does not show;
+  * a translucent stroke becomes an outline, filled by `NONZERO` in pieces
+    of about 16 segments, so that it is drawn once where it overlaps
+    itself.
 
   [design.md](design.md) has the details and the reasoning.
 * **Text:**

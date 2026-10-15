@@ -83,7 +83,8 @@ and how to check it. Strike items out as they land.
    reference gained nothing, twice, so copies are not it: profile the AOT
    build before guessing again.
 
-8. **Every stroke is outlined and filled by the nonzero sweep.** That is
+8. ~~**Every stroke is outlined and filled by the nonzero sweep.**~~ Done
+   (`stroke_triangles`; `pixels` strokes take the same path). That is
    what makes `chart` 83 ms and `dashed` 119 ms of record time plus 30 MB
    of upload. The union property only shows with a translucent paint.
    *Change:* for an opaque paint, emit the stroke directly: two triangles a
@@ -157,6 +158,11 @@ and how to check it. Strike items out as they land.
     `texture_rect` calls `texture_info` per image; `sprites` draws 10,000.
     *Change:* a small cache by texture id, cleared when `gfx` reopens; or an
     `image` overload that takes the size. *Check:* `sprites`' record time.
+
+After the performance items: run `bench/run_bench.py` whole on a quiet
+machine and commit the new `bench/results.md`, which still has the numbers
+from before them and lacks `gradients_fresh` and `chart_translucent`.
+Single runs here swung by 2x between them, so compare cases within one run.
 
 ## API and packaging
 

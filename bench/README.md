@@ -57,7 +57,8 @@ where it shows:
 | `path_fills` | many small paths: convex (fan) and not (band tessellation) |
 | `big_path` | one large outline: band tessellation at scale |
 | `self_crossing` | crossings: the band sweep's splitting at intersections |
-| `chart` | long polylines: the stroker and the tessellation of long outlines |
+| `chart` | long polylines, opaque: strokes emitted straight from the lines |
+| `chart_translucent` | the same half transparent: the stroker's outlines and the tessellation of long ones |
 | `dashed` | dashing, round caps, and curves flattened for strokes |
 | `text_page` | glyph layout and drawing with a warm atlas |
 | `text_wrapped` | word wrapping |

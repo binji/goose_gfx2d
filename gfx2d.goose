@@ -1253,9 +1253,26 @@ fn fill(p: const Path&, c, rule: i64 = NONZERO) {
 // The path stroked `width` wide, with miter joins and butt caps.
 fn stroke(p: const Path&, width: f64, c) { stroke(p, Stroke { width: width as f32 }, c); }
 
+// Whether a stroke in this paint can be drawn twice where it overlaps
+// itself without showing: an opaque color, blended normally.
+fn stroke_opaque(c: Color) -> bool { c.a >= 1.0 }
+fn stroke_opaque(p: Paint) -> bool {
+    if p.blend != BLEND_NORMAL || p.opacity < 1.0 || p.color.a < 1.0 || p.image.texture.id != 0 {
+        return false;
+    }
+    if p.gradient.kind != GRADIENT_NONE {
+        if p.gradient.stops.len == 0 { return false; }
+        for s in p.gradient.stops { if s.color.a < 1.0 { return false; } }
+    }
+    true
+}
+
 // The path stroked as `s` says. The stroke is made in the space the path is
 // drawn in, so under a stretching transform it stretches too, as a pen
 // would; with s.pixels, in pixels, the same width whatever the transform.
+// An opaque stroke is emitted straight from the line (stroke_triangles);
+// a translucent one is outlined and filled by the nonzero rule, so that
+// where it overlaps itself it is drawn once.
 fn stroke(p: const Path&, s: Stroke, c) {
     guard drawing();
     let scale = if s.pixels { 1.0 } else { max(pixel_scale(), 0.000001) };
@@ -1269,12 +1286,31 @@ fn stroke(p: const Path&, s: Stroke, c) {
     flat_contours.resize(0);
     flatten(p, if s.pixels { state.transform } else { IDENTITY }, TOLERANCE * px, flat_pts,
             flat_contours);
-    outline_pts.resize(0);
-    outline_cs.resize(0);
-    if s.dash.len > 0 {
+    let dashed = s.dash.len > 0;
+    if dashed {
         dash_pts.resize(0);
         dash_cs.resize(0);
         dash_contours(flat_pts, flat_contours, s.dash, s.dash_offset, dash_pts, dash_cs);
+    }
+    if k >= 1.0 && stroke_opaque(c) {
+        tess_out.resize(0);
+        tess_idx.resize(0);
+        if dashed {
+            stroke_triangles(dash_pts, dash_cs, half, s.join, s.cap, s.miter_limit, TOLERANCE * px,
+                             fringe() * px, tess_out, tess_idx);
+        } else {
+            stroke_triangles(flat_pts, flat_contours, half, s.join, s.cap, s.miter_limit,
+                             TOLERANCE * px, fringe() * px, tess_out, tess_idx);
+        }
+        if !s.pixels {
+            for &q in tess_out { q.p = apply(state.transform, q.p); }
+        }
+        add_mesh(c, k);
+        return;
+    }
+    outline_pts.resize(0);
+    outline_cs.resize(0);
+    if dashed {
         stroke_outline(dash_pts, dash_cs, half, s.join, s.cap, s.miter_limit, TOLERANCE * px,
                        outline_pts, outline_cs);
     } else {

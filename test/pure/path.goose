@@ -55,9 +55,33 @@ fn stroke_area(p: const gfx2d::Path&, half: f32, join: i64, cap: i64, dash: cons
     covered(v, idx)
 }
 
+// The same stroke drawn directly (stroke_triangles), with a fringe or not.
+fn direct_area(p: const gfx2d::Path&, half: f32, join: i64, cap: i64, dash: const f32[:], fringe: f32) -> f64 {
+    var pts: float2[>..<] = [];
+    var contours: gfx2d::Contour[>..<] = [];
+    gfx2d::flatten(p, gfx2d::IDENTITY, 0.01, pts, contours);
+    var dpts: float2[>..<] = [];
+    var dcontours: gfx2d::Contour[>..<] = [];
+    if dash.len > 0 { gfx2d::dash_contours(pts, contours, dash, 0, dpts, dcontours); }
+    var v: gfx2d::TessVertex[>..<] = [];
+    var idx: u32[>..<] = [];
+    if dash.len > 0 {
+        gfx2d::stroke_triangles(dpts, dcontours, half, join, cap, 4, 0.01, fringe, v, idx);
+    } else {
+        gfx2d::stroke_triangles(pts, contours, half, join, cap, 4, 0.01, fringe, v, idx);
+    }
+    covered(v, idx)
+}
+
 fn check(name: const u8[:], got: f64, want: f64, tolerance: f64) {
     if abs(got - want) <= tolerance { print(name, ": ok"); }
     else { print(name, ": got ", got, ", want ", want); }
+}
+
+fn ring_path() -> gfx2d::Path {
+    var ring = gfx2d::Path {};
+    gfx2d::circle(ring, 0, 0, 100);
+    return ring;
 }
 
 fn main() {
@@ -210,6 +234,38 @@ fn main() {
     gfx2d::line_to(dot, 5, 5);
     check("dot", stroke_area(dot, 5, gfx2d::JOIN_MITER, 1, []), PI * 25, 0.5);
 
+    // The direct stroke covers the same, with its joins' outer corners as
+    // fans and kites and its body as a strip, and its fringe adds nothing
+    // to the area (the ramp from covered to not is exact along an edge; a
+    // flat cap's corners are within a third of a pixel); only where it
+    // overlaps itself is there more.
+    check("direct butt", direct_area(seg, 5, gfx2d::JOIN_MITER, 0, [], 0), 1000, 0.01);
+    check("direct butt, fringed", direct_area(seg, 5, gfx2d::JOIN_MITER, 0, [], 1), 1000, 0.5);
+    check("direct square cap", direct_area(seg, 5, gfx2d::JOIN_MITER, 2, [], 1), 1100, 0.5);
+    check("direct round cap", direct_area(seg, 5, gfx2d::JOIN_MITER, 1, [], 1), 1000 + PI * 25, 0.5);
+    check("direct miter join", direct_area(corner, 5, gfx2d::JOIN_MITER, 0, [], 1), 2000, 0.5);
+    check("direct bevel join", direct_area(corner, 5, gfx2d::JOIN_BEVEL, 0, [], 1), 2000 - 12.5, 0.5);
+    check("direct round join", direct_area(corner, 5, gfx2d::JOIN_ROUND, 0, [], 1), 2000 - 25 + PI * 25 / 4, 0.5);
+    check("direct left turn", direct_area(left, 5, gfx2d::JOIN_MITER, 0, [], 1), 2000, 0.5);
+    check("direct closed", direct_area(sq, 5, gfx2d::JOIN_MITER, 0, [], 1), 110 * 110 - 90 * 90, 0.1);
+    check("direct closed, round", direct_area(sq, 5, gfx2d::JOIN_ROUND, 0, [], 1),
+          110 * 110 - 90 * 90 - (4 - PI) * 25, 0.5);
+    check("direct dashes", direct_area(seg, 5, gfx2d::JOIN_MITER, 0, [10.0, 10.0], 1), 500, 2);
+    check("direct dashes, round caps", direct_area(seg, 5, gfx2d::JOIN_MITER, 1, [10.0, 10.0], 1),
+          500 + 5 * PI * 25, 2);
+    check("direct dot", direct_area(dot, 5, gfx2d::JOIN_MITER, 1, [], 1), PI * 25, 0.5);
+    check("direct square dot", direct_area(dot, 5, gfx2d::JOIN_MITER, 2, [], 1), 100, 2);
+    let ring = ring_path();
+    check("direct ring", direct_area(ring, 5, gfx2d::JOIN_ROUND, 0, [], 1), PI * (105 * 105 - 95 * 95), 1);
+    // Crossing itself, it is drawn twice there: a square of the width more.
+    check("direct self-crossing", direct_area(cross, 5, gfx2d::JOIN_ROUND, 1, [], 0), hits * 0.01 + 100, 3);
+    // Segments shorter than the width, turning sharply: the inner sides
+    // pivot and overlap, so there is more than the union, never less.
+    var zag = gfx2d::Path {};
+    gfx2d::polygon(zag, [float2 { 0, 0 }, float2 { 3, 0 }, float2 { 0, 3 }, float2 { 3, 6 }, float2 { 0, 9 }], false);
+    print("direct sharp zigzag: at least the union ",
+          direct_area(zag, 5, gfx2d::JOIN_MITER, 0, [], 1) >= stroke_area(zag, 5, gfx2d::JOIN_MITER, 0, []) - 0.01);
+
     // A long stroke is outlined in pieces, each tessellated alone, cut across
     // the middle of segments so that together they cover the stroke exactly
     // once.
@@ -253,8 +309,6 @@ fn main() {
     }
     let wgroups, wpieces, wunion = pieces_and_union(wave, 3, gfx2d::JOIN_MITER);
     print("wave in pieces: ", wgroups, " groups; no overlap ", abs(wpieces - wunion) < 0.01);
-    var ring = gfx2d::Path {};
-    gfx2d::circle(ring, 0, 0, 100);
     let rgroups, rpieces, runion = pieces_and_union(ring, 5, gfx2d::JOIN_ROUND);
     print("circle in pieces: ", rgroups > 2, " groups; no overlap ", abs(rpieces - runion) < 0.01,
           ", the ring's area ", abs(runion - PI * (105 * 105 - 95 * 95)) < 1);

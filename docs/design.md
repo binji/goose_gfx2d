@@ -381,10 +381,20 @@ Goose's namespaces design leaves for later).
   than the analytic shapes.
 * **Stroke** (`stroke(path, width, paint)` or
   `stroke(path, Stroke { width, join, cap, miter_limit, dash, dash_offset, pixels }, paint)`):
-  * The stroker makes one outline per open subpath and two per closed
-    one, and fills them by `NONZERO`. A stroke that crosses itself is
-    drawn once where it overlaps, so translucent strokes don't darken
-    there.
+  * An opaque stroke (a color or a paint with no transparency, blended
+    normally) is emitted straight from the flattened line: a quad a
+    segment, a fan at each join's outer corner from the inner corner,
+    caps, and a fringe along the edges, exact along a straight one. Where
+    it overlaps itself (crossings, the inner side of a sharp join between
+    short segments) it is drawn twice, which an opaque paint does not show.
+    Each point's edge vertices are made once and shared by the segments
+    and the join at it, so a chart's lines take a third fewer triangles
+    and well under half the bytes of the sweep's, in half the time
+    (`bench`'s `chart` against `chart_translucent`).
+  * For a translucent stroke, the stroker makes one outline per open
+    subpath and two per closed one, and fills them by `NONZERO`. A stroke
+    that crosses itself is drawn once where it overlaps, so translucent
+    strokes don't darken there.
   * A stroke longer than 16 segments is outlined in pieces of about 16,
     each tessellated alone. One outline that long makes the band sweep's
     work grow with the square of its length: a 1,000-point chart line

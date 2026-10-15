@@ -253,8 +253,13 @@ fn self_crossing() {
     gfx2d::fill(p, gfx2d::rgba(0xCC3366, 0.5), gfx2d::EVEN_ODD);
 }
 
-// A chart: 20 series of 1,000 points each, round joins.
-fn chart() {
+// A chart: 20 series of 1,000 points each, round joins. Opaque, so the
+// strokes are emitted straight from the lines.
+fn chart() { chart_lines(1.0); }
+// The same half transparent: outlined and swept, so that a stroke is drawn
+// once where it overlaps itself.
+fn chart_translucent() { chart_lines(0.5); }
+fn chart_lines(alpha: f64) {
     seed(10);
     var pts: float2[>..] = [];
     for s in 20 {
@@ -264,7 +269,7 @@ fn chart() {
             y = clamp(y + rand(-8, 8), 0.0, H);
             pts.push(float2 { (i * W / 1000.0) as f32, y as f32 });
         }
-        gfx2d::polyline(pts, 2, rand_color(), gfx2d::CAP_ROUND, gfx2d::JOIN_ROUND);
+        gfx2d::polyline(pts, 2, gfx2d::with_alpha(rand_color(), alpha), gfx2d::CAP_ROUND, gfx2d::JOIN_ROUND);
     }
 }
 
@@ -491,6 +496,7 @@ fn main() {
     run("big_path") { f => big_path(); };
     run("self_crossing") { f => self_crossing(); };
     run("chart") { f => chart(); };
+    run("chart_translucent") { f => chart_translucent(); };
     run("dashed") { f => dashed(); };
     run("text_page") { f => text_page(); };
     run("text_wrapped") { f => text_wrapped(); };

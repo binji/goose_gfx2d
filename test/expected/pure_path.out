@@ -29,6 +29,23 @@ self-crossing: ok
 dashes: ok
 dashes, round caps: ok
 dot: ok
+direct butt: ok
+direct butt, fringed: ok
+direct square cap: ok
+direct round cap: ok
+direct miter join: ok
+direct bevel join: ok
+direct round join: ok
+direct left turn: ok
+direct closed: ok
+direct closed, round: ok
+direct dashes: ok
+direct dashes, round caps: ok
+direct dot: ok
+direct square dot: ok
+direct ring: ok
+direct self-crossing: ok
+direct sharp zigzag: at least the union true
 zigzag in pieces: 7 groups; no overlap true, union true
 wave in pieces: 9 groups; no overlap true
 circle in pieces: true groups; no overlap true, the ring's area true

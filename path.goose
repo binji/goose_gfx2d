@@ -868,6 +868,13 @@ fn emit_trap(t: OpenTrap, y: f32, out: TessVertex[>..<]&, idx: u32[>..<]&) {
 let STROKE_CHUNK = 16;
 
 var piece_pts: float2[>..<] = [];
+// stroke_triangles' scratch: a piece's segment directions and lengths, and
+// its stations.
+var piece_dirs: float2[>..<] = [];
+var piece_lens: f32[>..<] = [];
+var st_before: u32[>..<] = [];
+var st_after: u32[>..<] = [];
+var st_apex: u32[>..<] = [];
 
 // The outline of a stroke of `half` half width along the contours, as closed
 // contours appended to out_pts and out_contours, to be filled by the
@@ -1066,6 +1073,283 @@ fn stroke_outline(pts: const float2[:], contours: const Contour[:], half: f32, j
             outline_piece(if from < 0 { cap } else { -1 }, if last && !looped { cap } else { -1 });
             if last { break; }
             from = to;
+        }
+    }
+}
+
+// --- stroking, directly -------------------------------------------------------------
+
+// The stroke of `half` half width along the contours, as triangles
+// appended to out and idx with no outline and no sweep: a quad a segment,
+// a fan at the outer corner of each join, caps, and a fringe `fringe` wide
+// (0: none) along the edges, exact along a straight one. Where the stroke
+// overlaps itself (the inner side of a sharp join between short segments,
+// a crossing) it is drawn twice, which only a translucent paint shows: so
+// gfx2d.goose strokes opaque paints this way, the rest through
+// stroke_outline. Round joins and caps are flattened to `tolerance`.
+fn stroke_triangles(pts: const float2[:], contours: const Contour[:], half: f32, join: i64,
+                    cap: i64, miter_limit: f32, tolerance: f32, fringe: f32,
+                    out: TessVertex[>..<]&, idx: u32[>..<]&) {
+    // The body reaches w_in from the line, covered; the fringe goes on to
+    // w_out, uncovered there.
+    let w_in: f32 = max(half - fringe * 0.5, 0.0);
+    let w_out: f32 = half + fringe * 0.5;
+    let fringed = fringe > 0.0 && w_out > w_in;
+    fn v(p: float2, alpha: f32) -> u32 { add_vertex(out, p, alpha) }
+    fn tri(a: u32, b: u32, c: u32) { idx.append([a, b, c]); }
+    // Directions on the arc from d0 round to d1 the short way, n steps.
+    fn arc_n(d0: float2, d1: float2) -> i64 {
+        let sweep = abs(atan2(cross2(d0, d1), dot(d0, d1)));
+        let step = 2.0 * acos(clamp(1.0 - tolerance / max(half, 0.0001), -1.0, 1.0));
+        clamp(ceil(sweep / max(step, 0.01)) as i64, 1, 256)
+    }
+    fn arc_dir(d0: float2, d1: float2, i: i64, n: i64) -> float2 {
+        let a = atan2(d0.y, d0.x) + atan2(cross2(d0, d1), dot(d0, d1)) * i / n;
+        float2 { cos(a), sin(a) }
+    }
+    // A fan from vertex `apex` over the arc about c from direction d0 round
+    // to d1, and its fringe: from the vertices in0 (at w_in) and out0 (at
+    // w_out) at d0 to in1 and out1 at d1, the arc's points between made
+    // here.
+    fn fan(apex: u32, c: float2, d0: float2, d1: float2, in0: u32, out0: u32, in1: u32, out1: u32) {
+        let n = arc_n(d0, d1);
+        var i0 = in0;
+        var o0 = out0;
+        for k in n {
+            let last = k == n - 1;
+            let q = arc_dir(d0, d1, k + 1, n);
+            let i1 = if last { in1 } else { v(c + q * w_in, 1.0) };
+            tri(apex, i0, i1);
+            if fringed {
+                let o1 = if last { out1 } else { v(c + q * w_out, 0.0) };
+                add_quad(idx, i0, i1, o1, o0);
+                o0 = o1;
+            }
+            i0 = i1;
+        }
+    }
+    // The same with its ends made here too.
+    fn fan_from(apex: u32, c: float2, d0: float2, d1: float2) {
+        let in0 = v(c + d0 * w_in, 1.0);
+        let in1 = v(c + d1 * w_in, 1.0);
+        let out0 = if fringed { v(c + d0 * w_out, 0.0) } else { in0 };
+        let out1 = if fringed { v(c + d1 * w_out, 0.0) } else { in1 };
+        fan(apex, c, d0, d1, in0, out0, in1, out1);
+    }
+    // A butt or square end at e, the stroke leaving in direction u: the
+    // fringe across it, and at its corners.
+    fn flat_cap(e: float2, u: float2) {
+        if !fringed { return; }
+        let n = perp(u);
+        let f = u * fringe;
+        let li = v(e + n * w_in, 1.0);
+        let ri = v(e - n * w_in, 1.0);
+        add_quad(idx, li, ri, v(e - n * w_in + f, 0.0), v(e + n * w_in + f, 0.0));
+        add_quad(idx, li, v(e + n * w_out, 0.0), v(e + n * w_out + f, 0.0), v(e + n * w_in + f, 0.0));
+        add_quad(idx, ri, v(e - n * w_out, 0.0), v(e - n * w_out + f, 0.0), v(e - n * w_in + f, 0.0));
+    }
+    fn round_cap(e: float2, u: float2) {
+        let apex = v(e, 1.0);
+        let n = perp(u);
+        fan_from(apex, e, n, u);
+        fan_from(apex, e, u, n * float2 { -1, -1 });
+    }
+    // A vertex's stations: its four edge vertices, L_OUT (left of travel,
+    // at w_out), L_IN, R_IN and R_OUT, for the segment ending there
+    // (st_before) and the one starting there (st_after): the same four
+    // where the edges meet, going straight on or on the inner side of a
+    // turn, else each segment's own.
+    let L_OUT = 0;
+    let L_IN = 1;
+    let R_IN = 2;
+    let R_OUT = 3;
+    let NO_APEX: u32 = 0xFFFFFFFF;
+
+    for c in contours {
+        let n = c.count;
+        if n == 0 { continue; }
+        if n == 1 || (n == 2 && c.closed && length(pts[c.first + 1] - pts[c.first]) < 0.00001) {
+            // A dot: a round cap's circle, a square cap's square, else nothing.
+            let p = pts[c.first];
+            if cap == 1 {
+                round_cap(p, float2 { 1, 0 });
+                round_cap(p, float2 { -1, 0 });
+            } else if cap == 2 {
+                let x = float2 { 1, 0 };
+                let y = float2 { 0, 1 };
+                let o = p - x * w_in - y * w_in;
+                add_quad(idx, v(o, 1.0), v(o + x * (2.0 * w_in), 1.0), v(o + x * (2.0 * w_in) + y * (2.0 * w_in), 1.0),
+                         v(o + y * (2.0 * w_in), 1.0));
+                flat_cap(p + x * w_in, x);
+                flat_cap(p - x * w_in, x * float2 { -1, -1 });
+                flat_cap(p + y * w_in, y);
+                flat_cap(p - y * w_in, y * float2 { -1, -1 });
+            }
+            continue;
+        }
+        let looped = c.closed && n >= 3;
+        // The contour's points, repeats dropped, and an open one's ends
+        // moved for the cap: in by half the fringe for a butt cap, out by
+        // the half width less that for a square one.
+        piece_pts.resize(0);
+        for i in n {
+            let q = pts[c.first + i];
+            if piece_pts.len > 0 {
+                let last = piece_pts[piece_pts.len - 1];
+                if abs(last.x - q.x) < 0.00001 && abs(last.y - q.y) < 0.00001 { continue; }
+            }
+            piece_pts.push(q);
+        }
+        let m = piece_pts.len;
+        if m < 2 { continue; }
+        if !looped && cap != 1 {
+            let shift = if cap == 2 { fringe * 0.5 - half } else { fringe * 0.5 };
+            let d0 = unit(piece_pts[1] - piece_pts[0]);
+            let d1 = unit(piece_pts[m - 1] - piece_pts[m - 2]);
+            piece_pts[0] = piece_pts[0] + d0 * shift;
+            piece_pts[m - 1] = piece_pts[m - 1] - d1 * shift;
+        }
+        let segs = if looped { m } else { m - 1 };
+        piece_dirs.resize(0);
+        piece_lens.resize(0);
+        for j in segs {
+            let d = piece_pts[(j + 1) % m] - piece_pts[j];
+            piece_lens.push(length(d));
+            piece_dirs.push(unit(d));
+        }
+        fn dir(j: i64) -> float2 { piece_dirs[(j % segs + segs) % segs] }   // the segment from point j
+        fn len(j: i64) -> f32 { piece_lens[(j % segs + segs) % segs] }
+        fn interior(i: i64) -> bool { looped || (i > 0 && i < m - 1) }
+
+        st_before.resize(0);
+        st_before.resize(m * 4, 0);
+        st_after.resize(0);
+        st_after.resize(m * 4, 0);
+        st_apex.resize(0);
+        st_apex.resize(m, NO_APEX);     // the inner corner, where a join's edges meet
+        for i in m {
+            let p = piece_pts[i];
+            if !interior(i) {
+                let nl = perp(if i == 0 { dir(0) } else { dir(m - 2) });
+                let lin = v(p + nl * w_in, 1.0);
+                let rin = v(p - nl * w_in, 1.0);
+                let lout = if fringed { v(p + nl * w_out, 0.0) } else { lin };
+                let rout = if fringed { v(p - nl * w_out, 0.0) } else { rin };
+                st_before[i * 4 + L_OUT] = lout;
+                st_before[i * 4 + L_IN] = lin;
+                st_before[i * 4 + R_IN] = rin;
+                st_before[i * 4 + R_OUT] = rout;
+                st_after[i * 4 + L_OUT] = lout;
+                st_after[i * 4 + L_IN] = lin;
+                st_after[i * 4 + R_IN] = rin;
+                st_after[i * 4 + R_OUT] = rout;
+                continue;
+            }
+            let a = dir(i - 1);
+            let b = dir(i);
+            let turn = cross2(a, b);
+            let straight = abs(turn) < 0.00001 && dot(a, b) > 0.0;
+            for side in 2 {
+                let s: f32 = if side == 0 { 1.0 } else { -1.0 };
+                let na = perp(a) * s;
+                let nb = perp(b) * s;
+                let role_in = if side == 0 { L_IN } else { R_IN };
+                let role_out = if side == 0 { L_OUT } else { R_OUT };
+                let inner = !straight && (turn > 0.0) != (s > 0.0);
+                var met = straight;
+                var m_in = p + na * w_in;
+                var m_out = p + na * w_out;
+                if inner {
+                    // Where the edges meet, if within both segments.
+                    let k = 1.0 + dot(na, nb);
+                    let back = w_out * abs(turn) / max(k, 0.000001);
+                    if k > 0.0001 && back <= min(len(i - 1), len(i)) {
+                        met = true;
+                        m_in = p + (na + nb) * (w_in / k);
+                        m_out = p + (na + nb) * (w_out / k);
+                    }
+                }
+                if met {
+                    let vi = v(m_in, 1.0);
+                    let vo = if fringed { v(m_out, 0.0) } else { vi };
+                    st_before[i * 4 + role_in] = vi;
+                    st_after[i * 4 + role_in] = vi;
+                    st_before[i * 4 + role_out] = vo;
+                    st_after[i * 4 + role_out] = vo;
+                    if inner { st_apex[i] = vi; }
+                } else {
+                    let bi = v(p + na * w_in, 1.0);
+                    let ai = v(p + nb * w_in, 1.0);
+                    st_before[i * 4 + role_in] = bi;
+                    st_after[i * 4 + role_in] = ai;
+                    st_before[i * 4 + role_out] = if fringed { v(p + na * w_out, 0.0) } else { bi };
+                    st_after[i * 4 + role_out] = if fringed { v(p + nb * w_out, 0.0) } else { ai };
+                }
+            }
+        }
+        // The body, a quad a segment between its stations, and the fringe
+        // beside it.
+        for j in segs {
+            let f = j * 4;
+            let t = ((j + 1) % m) * 4;
+            add_quad(idx, st_after[f + L_IN], st_before[t + L_IN], st_before[t + R_IN], st_after[f + R_IN]);
+            if fringed {
+                add_quad(idx, st_after[f + L_IN], st_before[t + L_IN], st_before[t + L_OUT], st_after[f + L_OUT]);
+                add_quad(idx, st_before[t + R_IN], st_after[f + R_IN], st_after[f + R_OUT], st_before[t + R_OUT]);
+            }
+        }
+        // The joins: the outer corner of each turn, as a fan from the inner
+        // corner (the bodies end there on that side, so the fan must reach
+        // it), or from the point where the edges do not meet.
+        for i in m {
+            if !interior(i) { continue; }
+            let p = piece_pts[i];
+            let a = dir(i - 1);
+            let b = dir(i);
+            let turn = cross2(a, b);
+            if abs(turn) < 0.00001 && dot(a, b) > 0.0 { continue; }
+            let s: f32 = if turn > 0.0 { 1.0 } else { -1.0 };
+            let na = perp(a) * s;
+            let nb = perp(b) * s;
+            let role_in = if s > 0.0 { L_IN } else { R_IN };
+            let role_out = if s > 0.0 { L_OUT } else { R_OUT };
+            let a_in = st_before[i * 4 + role_in];
+            let b_in = st_after[i * 4 + role_in];
+            let a_out = st_before[i * 4 + role_out];
+            let b_out = st_after[i * 4 + role_out];
+            let apex = if st_apex[i] != NO_APEX { st_apex[i] } else { v(p, 1.0) };
+            if join == JOIN_ROUND {
+                fan(apex, p, na, nb, a_in, a_out, b_in, b_out);
+                continue;
+            }
+            if join == JOIN_MITER {
+                let k = 1.0 + dot(na, nb);
+                // The miter's length over the half width is sqrt(2 / k).
+                if k > 0.0001 && 2.0 / k <= miter_limit * miter_limit {
+                    let mi = v(p + (na + nb) * (w_in / k), 1.0);
+                    tri(apex, a_in, mi);
+                    tri(apex, mi, b_in);
+                    if fringed {
+                        let mo = v(p + (na + nb) * (w_out / k), 0.0);
+                        add_quad(idx, a_in, mi, mo, a_out);
+                        add_quad(idx, mi, b_in, b_out, mo);
+                    }
+                    continue;
+                }
+            }
+            tri(apex, a_in, b_in);
+            if fringed { add_quad(idx, a_in, b_in, b_out, a_out); }
+        }
+        if !looped {
+            let u0 = dir(0) * float2 { -1, -1 };
+            let u1 = dir(m - 2);
+            if cap == 1 {
+                round_cap(piece_pts[0], u0);
+                round_cap(piece_pts[m - 1], u1);
+            } else {
+                flat_cap(piece_pts[0], u0);
+                flat_cap(piece_pts[m - 1], u1);
+            }
         }
     }
 }
