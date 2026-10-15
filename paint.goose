@@ -252,6 +252,16 @@ fn append_ramp(g: Gradient, out: u8[>..<]&) {
     }
 }
 
-// Whether two gradients have the same ramp: what the ramp atlas shares a
-// row by.
-fn same_ramp(a: Gradient, b: Gradient) -> bool { a.space == b.space && a.stops == b.stops }
+// Whether two gradients have the same ramp, as near as a ramp can show:
+// what the ramp atlas shares a row by. Colors are compared as bytes and
+// offsets to 1/65536, so a gradient animated by less than that keeps its
+// row.
+fn same_ramp(a: Gradient, b: Gradient) -> bool {
+    if a.space != b.space || a.stops.len != b.stops.len { return false; }
+    for s, i in a.stops {
+        let t = b.stops[i];
+        if to_u32(s.color) != to_u32(t.color) { return false; }
+        if round(s.offset * 65536.0) != round(t.offset * 65536.0) { return false; }
+    }
+    true
+}

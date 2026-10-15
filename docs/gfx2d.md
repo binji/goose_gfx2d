@@ -55,7 +55,7 @@ SVG, animated by warping its path, with an iridescent gloss). Each takes
 | `frame(clear, samples = 1) { … }` | draw on the screen, cleared, then `end()`; multisampled when `samples` is 2, 4 or 8 |
 | `draw_into(target, clear, samples = 1) { … }` | the same into a texture of the program's (a `COLOR_TARGET`) |
 | `begin(target, clear, samples = 1)`, `begin(target)`, `begin_screen(…)`, `end()` | the same without a block; `begin(target)` draws over what's there |
-| `stats() -> Stats` | what the last `end()` drew: instances, triangles, draw calls, paints, gradient ramps, bytes uploaded, passes, clips |
+| `stats() -> Stats` | what the last `end()` drew: instances, triangles, draw calls, paints, gradient ramps baked (new that frame), bytes uploaded, passes, clips |
 
 Draws are recorded and drawn at `end()` in a pass of gfx2d's own. `begin`
 and `end` therefore go between a program's own `gfx` passes, not inside
@@ -213,6 +213,10 @@ Goose program ──► gfx2d (Goose: shapes, paints, paths, text layout, passes
     blur and copy passes for layers.
   * Per frame, the instances (112 bytes), mesh vertices (24 bytes) and
     indices, paints (96 bytes) and clips (64 bytes) are each uploaded once.
+    Gradient ramps are kept between frames, a row of a 256-wide atlas
+    each, and only new rows are baked and uploaded; a full atlas (4,096
+    rows) draws further gradients as their middle color that frame and
+    starts over at the next.
   * A batch is one draw call. Shape batches split on blend mode, image and
     mask; mesh batches also on their clip.
   * Layer, mask and canvas textures come from a pool kept between frames;

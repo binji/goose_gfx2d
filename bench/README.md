@@ -49,7 +49,8 @@ where it shows:
 | `empty` | the fixed cost of a frame: one pass, a submit, a wait |
 | `circles`, `mixed_shapes` | analytic shapes: one instance each, one batch; the cost per shape |
 | `transformed` | the transform stack: three nested blocks per shape |
-| `gradients` | a gradient per shape, each its own stops: ramp baking and sharing |
+| `gradients` | a gradient per shape, each its own stops, kept from frame to frame: the ramp lookup |
+| `gradients_fresh` | the same with the ramps forgotten each frame: ramp baking, the first frame's cost |
 | `shared_gradients` | many shapes on a few gradients: paint records deduplicated, ramps shared |
 | `sprites` | images from one sheet: sub-rects, one batch |
 | `sprites_alternating` | the worst batching: a draw call per sprite |

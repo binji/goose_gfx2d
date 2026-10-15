@@ -253,10 +253,13 @@ value with no allocation.
   `REFLECT`) and an interpolation space. They're baked on the CPU
   (`paint.goose`, testable without a GPU) into rows of a 256-wide *ramp
   atlas* texture, stored premultiplied so filtering doesn't darken where
-  alpha changes. Gradients in the same frame with the same stops and space
-  share a row. The paint carries only a row index and the gradient's
-  geometry. A radial gradient's focal point is clamped to inside its
-  circle.
+  alpha changes. Gradients with the same stops and space share a row, and
+  the rows are kept between frames: a gradient drawn every frame is baked
+  and uploaded once. The atlas holds 4,096 rows; full, it draws further
+  gradients as their middle color for the rest of that frame (the frame's
+  paints name its rows) and starts over at the next. The paint carries
+  only a row index and the gradient's geometry. A radial gradient's focal
+  point is clamped to inside its circle.
 * **Images** carry a `gfx::Texture`, a placement (an `Affine` from the
   image's pixels into the paint's space), an optional source rectangle in
   pixels (sprite sheets), a wrap mode (`CLAMP`, `REPEAT`, `MIRROR`,

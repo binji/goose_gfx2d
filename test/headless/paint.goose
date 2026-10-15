@@ -207,9 +207,11 @@ fn main() {
           at(28, 4), "; opacity: ", at(36, 4));
 
     // Sharing: one paint for many shapes, one ramp for one gradient's
-    // stops wherever it is, one draw while only solid shapes come between
+    // stops wherever it is (and none baked again the next frame, since
+    // ramps are kept), one draw while only solid shapes come between
     // images of one texture.
-    draw(black) {
+    gfx2d::reset_ramps();
+    fn sharing() {
         let p = gfx2d::radial(0, 0, 10, white, black);
         for i in 100 { gfx2d::circle(i, i, 3, p); }
         gfx2d::rect(0, 0, 4, 4, gfx2d::linear(0, 0, 4, 0, white, black));
@@ -217,10 +219,35 @@ fn main() {
         gfx2d::image(tex, 0, 0);
         gfx2d::circle(5, 5, 5, gfx2d::RED);
         gfx2d::image(tex, 10, 0);
-    };
+    }
+    draw(black) { sharing(); };
     var s = gfx2d::stats();
     print("shared: ", s.instances, " instances, ", s.paints, " paints, ", s.ramps, " ramps, ",
           s.draws, " draw");
+    let first = copy(px);
+    draw(black) { sharing(); };
+    s = gfx2d::stats();
+    print("the next frame: ", s.ramps, " ramps baked, the same pixels from the kept one ", px == first);
+    // The ramp atlas full: the gradients past the last row are drawn as
+    // their middle color this frame, and the atlas starts over next frame
+    // with them in it.
+    gfx2d::RAMP_MAX_ROWS = 4;
+    gfx2d::reset_ramps();
+    fn ramps(from: i64) {
+        for i in from..5 {
+            let c = gfx2d::rgb(0x202020 * (i + 1));
+            gfx2d::rect(i * 8, 0, 8, 4, gfx2d::linear(i * 8, 0, i * 8 + 8, 0, c, black));
+        }
+    }
+    draw(black) { ramps(0); };
+    s = gfx2d::stats();
+    print("full: ", s.ramps, " ramps, the fifth its middle color ", at(33, 1), " ", at(39, 1), ", full ", gfx2d::ramps_full);
+    draw(black) { ramps(4); };
+    s = gfx2d::stats();
+    print("after: ", s.ramps, " ramp baked, the fifth a gradient ", red(33, 1) > 100 && red(39, 1) < 40 && red(39, 1) > 0,
+          ", full ", gfx2d::ramps_full);
+    gfx2d::RAMP_MAX_ROWS = 4096;
+    gfx2d::reset_ramps();
     draw(black) {
         gfx2d::image(tex, 0, 0);
         gfx2d::image(white_tex, 10, 0);

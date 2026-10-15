@@ -147,7 +147,8 @@ struct Renderer {
     paints: gfx::Buffer = gfx::Buffer { 0 },
     paint_bytes: i64 = 0,
     ramps: gfx::Texture = gfx::Texture { 0 },   // RAMP_WIDTH wide, a gradient a row
-    ramp_rows: i64 = 0,
+    ramp_rows: i64 = 0,                 // its height
+    ramp_uploaded: i64 = 0,             // the rows of ramp_pixels it holds
     white: gfx::Texture = gfx::Texture { 0 },   // bound where a paint has no image
     // By filter * 3 + wrap: FILTER_* and gfx's REPEAT, MIRROR, CLAMP.
     samplers: gfx::Sampler[6] = [gfx::Sampler { 0 }; 6],
@@ -262,14 +263,24 @@ var mesh_vertices: MeshVertex[>..<] = [];
 var mesh_indices: u32[>..<] = [];
 var batches: Batch[>..<] = [];
 var paints: PaintGPU[>..<] = [];
-var ramp_gradients: Gradient[>..<] = [];    // the frame's ramps, a row each
-var ramp_pixels: u8[>..<] = [];
-var ramp_hashes: u64[>..<] = [];           // by row
-var ramp_table: i64[>..<] = [];            // open addressing: row + 1, 0 empty
 var saved: Affine[>..<] = [];               // push()'s transforms
 
+// The ramp atlas: the gradients' ramps, a row each, kept from frame to
+// frame (a gradient drawn every frame is baked once) and uploaded as rows
+// are added. Full, it places no more that frame (the frame's paints name
+// its rows), and starts over at the next begin().
+var ramp_gradients: Gradient[>..<] = [];    // by row
+var ramp_pixels: u8[>..<] = [];            // RAMP_WIDTH x 4 bytes a row
+var ramp_hashes: u64[>..<] = [];           // by row
+var ramp_table: i64[>..<] = [];            // open addressing: row + 1, 0 empty
+var RAMP_MAX_ROWS = 4096;                   // 4 MB; a variable so a test can fill it
+var ramps_full = false;
+var ramps_baked = 0;                        // rows added this frame
+var warned_ramps = false;
+
 // What the last end() drew.
-struct Stats { instances: i64, triangles: i64, draws: i64, paints: i64, ramps: i64,
+struct Stats { instances: i64, triangles: i64, draws: i64, paints: i64,
+               ramps: i64,      // gradient ramps baked this frame (ones kept from before are not counted)
                bytes: i64,      // uploaded: instances, mesh vertices and indices, paints, clips
                passes: i64, clips: i64 }
 var last_stats: Stats;
@@ -309,6 +320,7 @@ fn begin_into(target: gfx::Texture, clear: bool, clear_color: Color, samples: i6
     if state.drawing { misuse("begin: already drawing; end() the last frame first"); }
     ensure_renderer();
     begin_atlas_frame();
+    begin_ramp_frame();
     let info = gfx::texture_info(target);
     state = FrameState { drawing: true, target: target, width: info.width, height: info.height,
                          transform: IDENTITY, pass: 0, clip: 0, aliased: false };
@@ -338,10 +350,6 @@ fn begin_into(target: gfx::Texture, clear: bool, clear_color: Color, samples: i6
     mesh_indices.resize(0);
     batches.resize(0);
     saved.resize(0);
-    ramp_gradients.resize(0);
-    ramp_hashes.resize(0);
-    ramp_table.resize(0);
-    ramp_pixels.resize(0);
     paints.resize(0);
     // Paint 0: the instance's color alone.
     paints.push(PaintGPU { image_mode: IMAGE_NONE, g1: float4 { 0.0, 0.0, 0.0, 1.0 }, .. });
@@ -446,21 +454,46 @@ fn upload(b: gfx::Buffer&, capacity: i64&, usage: i64, data: const u8[:]) {
     }
 }
 
+// The ramp atlas's texture holds every row baked so far: the rows added
+// since the last upload go up, into a taller texture (every row again)
+// when they have outgrown it.
 fn upload_ramps() {
     let rows = ramp_gradients.len;
     if rows == 0 { return; }
     if rows > renderer.ramp_rows {
         if renderer.ramp_rows > 0 { gfx::release(renderer.ramps); }
-        renderer.ramp_rows = max(rows, max(renderer.ramp_rows * 2, 16));
+        renderer.ramp_rows = min(max(rows, max(renderer.ramp_rows * 2, 16)), RAMP_MAX_ROWS);
         renderer.ramps = gfx::texture2d(RAMP_WIDTH, renderer.ramp_rows);
+        renderer.ramp_uploaded = 0;
     }
-    gfx::update_texture(renderer.ramps, gfx::Region { w: RAMP_WIDTH, h: rows as i32 },
-                        ramp_pixels);
+    let from = renderer.ramp_uploaded;
+    if from < rows {
+        gfx::update_texture(renderer.ramps, gfx::Region { y: from as i32, w: RAMP_WIDTH, h: (rows - from) as i32 },
+                            ramp_pixels[from * RAMP_WIDTH * 4 .. rows * RAMP_WIDTH * 4]);
+        renderer.ramp_uploaded = rows;
+    }
+}
+
+// Forgets every ramp: the atlas starts empty again. Between frames only;
+// a frame's paints name rows.
+fn reset_ramps() {
+    ramp_gradients.resize(0);
+    ramp_hashes.resize(0);
+    ramp_table.resize(0);
+    ramp_pixels.resize(0);
+    renderer.ramp_uploaded = 0;
+    ramps_full = false;
+}
+
+// At a frame's start: an atlas that filled last frame starts over.
+fn begin_ramp_frame() {
+    if ramps_full { reset_ramps(); }
+    ramps_baked = 0;
 }
 
 fn flush_batches() {
     last_stats = Stats { instances: instances.len, triangles: mesh_indices.len / 3,
-                         draws: batches.len, paints: paints.len - 1, ramps: ramp_gradients.len,
+                         draws: batches.len, paints: paints.len - 1, ramps: ramps_baked,
                          bytes: instances.len * INSTANCE_SIZE + bytes_of(mesh_vertices).len +
                                 mesh_indices.len * 4 + paints.len * PAINT_SIZE + clips.len * CLIP_SIZE,
                          passes: passes.len, clips: clips.len - 1 };
@@ -532,10 +565,11 @@ fn flush_batches() {
     }
 }
 
-// The row of the frame's ramp atlas holding g's ramp, added if no
-// gradient so far has the same one.
+// The row of the ramp atlas holding g's ramp, added if no gradient so far
+// has the same one; or -1 if the atlas is full, until the next frame.
 fn ramp_row(g: Gradient) -> i64 {
     let h = ramp_hash(g);
+    if ramps_full { return -1; }
     if (ramp_gradients.len + 1) * 2 > ramp_table.len {
         // Twice the room, the rows so far put in again.
         let n = max(ramp_table.len * 2, 64);
@@ -550,9 +584,18 @@ fn ramp_row(g: Gradient) -> i64 {
         if ramp_hashes[row] == h && same_ramp(ramp_gradients[row], g) { return row; }
         i = (i + 1) & mask;
     }
+    if ramp_gradients.len >= RAMP_MAX_ROWS {
+        ramps_full = true;
+        if !warned_ramps {
+            write_stderr("gfx2d: the gradient ramp atlas is full; new gradients are drawn as their middle color this frame, and the atlas starts over next frame\n");
+            warned_ramps = true;
+        }
+        return -1;
+    }
     ramp_gradients.push(g);
     ramp_hashes.push(h);
     append_ramp(g, ramp_pixels);
+    ramps_baked++;
     let row = ramp_gradients.len - 1;
     ramp_table[i] = row + 1;
     row
@@ -581,8 +624,10 @@ fn ramp_hash(g: Gradient) -> u64 {
     h ^ (h >> 29)
 }
 
-// p's index in the frame's paints, added unless it is the last one added.
-fn paint_index(p: Paint) -> u32 {
+// p's index in the frame's paints, added unless it is the last one added;
+// `row` is its gradient's in the ramp atlas, or -1 for none (the atlas
+// full), which leaves the gradient out.
+fn paint_index(p: Paint, row: i64) -> u32 {
     let g = p.gradient;
     var gpu = PaintGPU {
         kind: g.kind as u32,
@@ -593,7 +638,8 @@ fn paint_index(p: Paint) -> u32 {
         ..
     };
     if g.kind != GRADIENT_NONE {
-        gpu.g1.z = ramp_row(g);
+        if row < 0 { gpu.kind = GRADIENT_NONE as u32; }
+        gpu.g1.z = max(row, 0);
         if g.kind == GRADIENT_LINEAR {
             gpu.g0 = float4 { g.p0.x, g.p0.y, g.p1.x, g.p1.y };
         } else if g.kind == GRADIENT_RADIAL {
@@ -647,7 +693,14 @@ fn paint_key(p: Paint) -> PaintKey {
     if p.blend > BLEND_REPLACE {
         misuse("a Paint's blend mode can be NORMAL, ADD, MULTIPLY or REPLACE; the others need a layer");
     }
-    PaintKey { color: to_float4(p.color), paint: paint_index(p), blend: clamp(p.blend, 0, 3),
+    var color = to_float4(p.color);
+    var row = -1;
+    if p.gradient.kind != GRADIENT_NONE {
+        row = ramp_row(p.gradient);
+        // No row for it: its middle color, tinted, stands in.
+        if row < 0 { color *= to_float4(gradient_at(p.gradient, 0.5)); }
+    }
+    PaintKey { color: color, paint: paint_index(p, row), blend: clamp(p.blend, 0, 3),
                texture: if has_image { img.texture } else { gfx::Texture { 0 } },
                sampler: if has_image { sampler } else { 2 } }
 }

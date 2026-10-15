@@ -16,4 +16,7 @@ nine-slice: 255,0,0,255 255,0,0,255 0,255,0,255 0,255,0,255 255,0,0,255 255,0,0,
 nine-slice seams: 0
 add: 255,0,255,255; half add: 128,0,255,255; multiply: 0,0,128,255; replace: 128,0,0,128; opacity: 128,0,128,255
 shared: 105 instances, 5 paints, 1 ramps, 1 draw
+the next frame: 0 ramps baked, the same pixels from the kept one true
+full: 4 ramps, the fifth its middle color 80,80,80,255 80,80,80,255, full true
+after: 1 ramp baked, the fifth a gradient true, full false
 batches: 5 draws for a texture, another, the first again, another filter and a blend

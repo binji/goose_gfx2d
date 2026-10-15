@@ -59,7 +59,8 @@ and how to check it. Strike items out as they land.
 
 ## Performance
 
-6. **Gradient ramps are baked and uploaded again every frame.** The
+6. ~~**Gradient ramps are baked and uploaded again every frame.**~~ Done
+   (with `gradients_fresh` in the benchmark for the baking itself). The
    `gradients` case spends 44 ms baking 2,000 ramps that do not change
    between frames, and uploads the whole atlas each frame.
    *Change:* keep the ramp table across frames, keyed by the hash it has

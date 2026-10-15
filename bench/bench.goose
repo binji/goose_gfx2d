@@ -154,7 +154,8 @@ fn transformed() {
 
 // --- paints --------------------------------------------------------------------------
 
-// Each gradient its own stops: a ramp each, baked on the CPU every frame.
+// Each gradient its own stops: a ramp each, baked on the CPU the first
+// frame and kept.
 fn gradients() {
     seed(4);
     for i in 2000 {
@@ -167,6 +168,13 @@ fn gradients() {
             gfx2d::circle(x, y, 30, gfx2d::paint(gfx2d::radial_gradient(x, y, 30, stops)));
         }
     }
+}
+
+// The same with the ramps forgotten first: every ramp baked again, as the
+// first frame with new gradients costs.
+fn gradients_fresh() {
+    gfx2d::reset_ramps();
+    gradients();
 }
 
 // Many shapes sharing a few gradients: ramps and paint records shared.
@@ -475,6 +483,7 @@ fn main() {
     run("mixed_shapes") { f => mixed_shapes(); };
     run("transformed") { f => transformed(); };
     run("gradients") { f => gradients(); };
+    run("gradients_fresh") { f => gradients_fresh(); };
     run("shared_gradients") { f => shared_gradients(); };
     run("sprites") { f => sprites(); };
     run("sprites_alternating") { f => sprites_alternating(); };
