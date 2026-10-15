@@ -17,6 +17,8 @@ layout(location = 5) flat in vec4 v_color;
 layout(location = 6) in vec2 v_user;
 layout(location = 7) flat in uint v_paint;
 layout(location = 8) flat in uint v_clip;
+layout(location = 9) flat in float v_px;
+layout(location = 10) flat in vec2 v_sc;
 
 layout(set = 2, binding = 0) uniform sampler2D ramp;
 layout(set = 2, binding = 1) uniform sampler2D image;
@@ -37,10 +39,8 @@ layout(location = 0) out vec4 result;
 
 void main() {
     vec2 p = v_local;
-    // One pixel in local units: the local distance a step to the next pixel
-    // covers, averaged over x and y, so rotation leaves it alone.
-    float px = max(0.5 * (length(dFdx(p)) + length(dFdy(p))), 1e-6);
-    vec2 sc = vec2(sin(v_geom.y), cos(v_geom.y));
+    float px = v_px;
+    vec2 sc = v_sc;
     float d;
     float hard = 1.0;
     if (v_kind == KIND_RECT) {
@@ -85,10 +85,16 @@ void main() {
     float coverage = clamp(0.5 - d / px, 0.0, 1.0) * k;
     if ((v_flags & FLAG_ALIASED) != 0u) coverage = d < 0.0 ? min(k * 1e6, 1.0) : 0.0;
     if (v_kind == KIND_SHADOW) coverage = box_shadow(p, v_geom.xy, v_radii.x, max(v_geom.z, 1e-3));
-    coverage *= clip_coverage(v_clip, gl_FragCoord.xy);
-
-    // The paint is read in every fragment, uniformly, so the derivatives
-    // the image's sampling takes stay defined.
-    vec4 c = paint_color(paints[v_paint], v_color, v_user, gl_FragCoord.xy, ramp, image) * coverage;
+    vec4 c;
+    if (v_paint == 0u && v_clip == 0u) {
+        // The color alone, unclipped: most shapes, with none of the below.
+        c = vec4(v_color.rgb * v_color.a, v_color.a) * coverage;
+    } else {
+        // These are per instance (flat), so the branch is uniform over a
+        // primitive, and the derivatives the image's sampling takes stay
+        // defined.
+        coverage *= clip_coverage(v_clip, gl_FragCoord.xy);
+        c = paint_color(paints[v_paint], v_color, v_user, gl_FragCoord.xy, ramp, image) * coverage;
+    }
     result = blend_out(c, blend);
 }

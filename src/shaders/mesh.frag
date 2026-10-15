@@ -21,6 +21,13 @@ layout(location = 0) out vec4 result;
 #include "clip_coverage.glsl"
 
 void main() {
-    vec4 c = paint_color(paints[v_paint], v_color, v_user, gl_FragCoord.xy, ramp, image);
-    result = blend_out(c * clip_coverage(clip, gl_FragCoord.xy), blend);
+    vec4 c;
+    if (v_paint == 0u && clip == 0u) {
+        // The color alone, unclipped: a flat (per primitive) and a uniform.
+        c = vec4(v_color.rgb * v_color.a, v_color.a);
+    } else {
+        c = paint_color(paints[v_paint], v_color, v_user, gl_FragCoord.xy, ramp, image)
+            * clip_coverage(clip, gl_FragCoord.xy);
+    }
+    result = blend_out(c, blend);
 }

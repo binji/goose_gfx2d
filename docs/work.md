@@ -103,7 +103,9 @@ and how to check it. Strike items out as they land.
    no fringe. *Check:* a pure test that a mesh drawn twice gives the same
    triangles, and `big_path` drawn retained.
 
-10. **The shape fragment shader does per-instance work per fragment.**
+10. ~~**The shape fragment shader does per-instance work per fragment.**~~
+    Done: GPU time for clips 19 to 13 ms, path clips 15 to 11, text 6.5 to
+    5.1, mixed shapes 17 to 16; circles and box shadows unchanged.
     `shape.frag` takes the sine and cosine of the span angle, and the pixel
     size from derivatives, in every fragment, though both are constant per
     instance under an affine transform; and it reads the paint record and

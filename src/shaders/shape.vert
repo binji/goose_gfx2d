@@ -19,6 +19,8 @@ layout(location = 5) flat out vec4 v_color;
 layout(location = 6) out vec2 v_user;
 layout(location = 7) flat out uint v_paint;
 layout(location = 8) flat out uint v_clip;
+layout(location = 9) flat out float v_px;      // one pixel in local units
+layout(location = 10) flat out vec2 v_sc;      // the sine and cosine of a sector's half angle
 
 const vec2 corners[6] = vec2[6](vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(1.0, 1.0),
                                 vec2(-1.0, -1.0), vec2(1.0, 1.0), vec2(-1.0, 1.0));
@@ -52,4 +54,11 @@ void main() {
     v_user = s.lm.xy * p.x + s.lm.zw * p.y + s.lt;
     v_paint = s.paint;
     v_clip = s.clip;
+    // One pixel in local units: how far in local space a step to the next
+    // pixel goes, along x and along y, averaged, so rotation leaves it
+    // alone. The transform is affine, so it is the same over the quad, and
+    // the fragment shader need not take derivatives for it.
+    float det = s.m.x * s.m.w - s.m.y * s.m.z;
+    v_px = max(0.5 * (length(vec2(s.m.w, -s.m.y)) + length(vec2(-s.m.z, s.m.x))) / max(abs(det), 1e-12), 1e-6);
+    v_sc = vec2(sin(s.geom.y), cos(s.geom.y));
 }

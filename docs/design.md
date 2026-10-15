@@ -468,9 +468,12 @@ struct Affine { a: f32, b: f32, c: f32, d: f32, tx: f32, ty: f32 }   // x' = a x
   testing a transformed shape against the mouse needs one call.
 
 Every instance carries its full 2×3 matrix, so a transform doesn't break a
-batch. Because the shader computes anti-aliasing from screen-space
-derivatives of the distance (`fwidth`), edges stay one pixel wide under
-rotation, non-uniform scale and skew.
+batch. The vertex shader works out how far in local units one pixel is
+from that matrix (an affine map, so it is the same over the quad; taking
+derivatives in the fragment shader found the same), and the fragment
+shader antialiases over that, so edges stay one pixel wide under rotation,
+non-uniform scale and skew. An instance with no paint record and no clip,
+which most are, skips the paint and clip code altogether.
 
 ## Anti-aliasing
 
