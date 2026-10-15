@@ -129,6 +129,7 @@ fn release(f: Font) {
         for &e in font_entries { if e.fallback == f { e.fallback = Font { 0 }; } }
     }
     if default_font_handle == f { default_font_handle = Font { 0 }; }
+    reset_font_caches();
     font_release(f);
 }
 
@@ -167,9 +168,13 @@ let ATLAS_W = 1024;
 // How tall the atlas may grow; a variable so a test can fill it.
 var atlas_max_h = 4096;
 
-// A glyph of a font in the atlas: where, and where its bitmap goes from
-// the pen at BASE_SIZE. w == 0: nothing to draw (a space).
-struct GlyphSlot { key: u64, x: i32, y: i32, w: i32, h: i32, xoff: f32, yoff: f32 }
+// A glyph of a font: its advance (font units), and once it is `placed`,
+// where in the atlas, and where its bitmap goes from the pen at
+// BASE_SIZE. Placed with w == 0: nothing to draw (a space). A slot is made
+// the first time the glyph is measured, and placed the first time it is
+// drawn.
+struct GlyphSlot { key: u64, x: i32, y: i32, w: i32, h: i32, xoff: f32, yoff: f32,
+                   advance: i32 = 0, placed: bool = false }
 
 var glyph_slots: GlyphSlot[>..<] = [];      // open addressing; key 0 is empty
 var glyph_count = 0;
@@ -278,11 +283,28 @@ fn pack(w: i64, h: i64) -> i64, i64, bool {
 // Glyph `glyph` of font f in the atlas, rasterized the first time; with
 // nothing to draw (w 0) if the atlas is full, until it starts over at the
 // next frame.
-fn glyph_slot(f: Font, glyph: i32) -> GlyphSlot {
+// The index of the glyph's slot, made with its advance if it has none.
+fn slot_index(f: Font, glyph: i32) -> i64 {
     let key = glyph_key(f, glyph);
     let found = find_slot(key);
-    if found >= 0 { return glyph_slots[found]; }
-    if atlas_full { return GlyphSlot { key, 0, 0, 0, 0, 0.0, 0.0 }; }
+    if found >= 0 { return found; }
+    insert_slot(GlyphSlot { key, 0, 0, 0, 0, 0.0, 0.0, advance_of(f, glyph), false });
+    find_slot(key)
+}
+
+// The glyph's advance, in font units, from its slot: one call into the
+// font for each glyph ever seen.
+fn glyph_advance(f: Font, glyph: i32) -> i32 {
+    let at = slot_index(f, glyph);
+    glyph_slots[at].advance
+}
+
+fn glyph_slot(f: Font, glyph: i32) -> GlyphSlot {
+    let at = slot_index(f, glyph);
+    if glyph_slots[at].placed { return glyph_slots[at]; }
+    let key = glyph_slots[at].key;
+    let advance = glyph_slots[at].advance;
+    if atlas_full { return GlyphSlot { key, 0, 0, 0, 0, 0.0, 0.0, advance, false }; }
     let m = metrics_of(f);
     let scale = BASE_SIZE / m.units_per_em;
     var info = GlyphBitmap { 0, 0, 0, 0 };
@@ -292,19 +314,20 @@ fn glyph_slot(f: Font, glyph: i32) -> GlyphSlot {
         sdf_scratch.resize(info.w * info.h, 0);
         ok = glyph_sdf(f, glyph, scale, GLYPH_PAD, GLYPH_ON_EDGE, GLYPH_DIST_SCALE, sdf_scratch, info);
     }
-    var s = GlyphSlot { key, 0, 0, 0, 0, info.xoff, info.yoff };
+    var s = GlyphSlot { key, 0, 0, 0, 0, info.xoff, info.yoff, advance, true };
     if ok && info.w > 0 && info.h > 0 {
         let x, y, room = pack(info.w, info.h);
         if !room {
-            // Full. Not remembered, so it is placed at the next frame, once
-            // the atlas has started over; unless it would not fit even
-            // then, which is remembered as nothing to draw.
-            if glyph_count == 0 { insert_slot(s); return s; }
+            // Full. Not placed, so it is at the next frame, once the atlas
+            // has started over; unless it would not fit even an empty
+            // atlas, which is remembered as nothing to draw.
+            if shelf_x == 0 && shelf_y == 0 { glyph_slots[at] = s; return s; }
             atlas_full = true;
             if !warned_full {
                 write_stderr("gfx2d: the glyph atlas is full; text needing new glyphs is missing this frame, and the atlas starts over next frame\n");
                 warned_full = true;
             }
+            s.placed = false;
             return s;
         }
         if room {
@@ -323,7 +346,7 @@ fn glyph_slot(f: Font, glyph: i32) -> GlyphSlot {
             }
         }
     }
-    insert_slot(s);
+    glyph_slots[at] = s;
     s
 }
 
@@ -394,9 +417,74 @@ fn decode_utf8(s: const u8[:], i: i64) -> u32, i64 {
     return cp, i + n + 1;
 }
 
+// Two tables of what the fonts answered, so that a line is laid out
+// without calling into them: the glyph a character resolves to (through
+// the fallbacks), and the kerning of a pair of glyphs. Open addressing,
+// u64 keys with 0 empty, u64 values.
+var cmap_keys: u64[>..<] = [];
+var cmap_vals: u64[>..<] = [];
+var cmap_count = 0;
+var kern_keys: u64[>..<] = [];
+var kern_vals: u64[>..<] = [];
+var kern_count = 0;
+
+fn cache_find(keys: const u64[:], key: u64) -> i64 {
+    let n = keys.len;
+    if n == 0 { return -1; }
+    var i = slot_hash(key, n);
+    loop {
+        let k = keys[i];
+        if k == key { return i; }
+        if k == 0 { return -1; }
+        i = (i + 1) & (n - 1);
+    }
+}
+fn cache_place(keys: u64[>..<]&, vals: u64[>..<]&, key: u64, val: u64) {
+    let n = keys.len;
+    var i = slot_hash(key, n);
+    while keys[i] != 0 { i = (i + 1) & (n - 1); }
+    keys[i] = key;
+    vals[i] = val;
+}
+fn cache_insert(keys: u64[>..<]&, vals: u64[>..<]&, count: i64&, key: u64, val: u64) {
+    if (count + 1) * 2 > keys.len {
+        let old_keys = copy(keys);
+        let old_vals = copy(vals);
+        let n = max(keys.len * 2, 256);
+        keys.resize(0);
+        keys.resize(n, 0);
+        vals.resize(0);
+        vals.resize(n, 0);
+        for k, i in old_keys { if k != 0 { cache_place(keys, vals, k, old_vals[i]); } }
+    }
+    cache_place(keys, vals, key, val);
+    count++;
+}
+// Forgets what the fonts answered: when a font is released, since its id
+// may be given to another.
+fn reset_font_caches() {
+    cmap_keys.resize(0);
+    cmap_vals.resize(0);
+    cmap_count = 0;
+    kern_keys.resize(0);
+    kern_vals.resize(0);
+    kern_count = 0;
+}
+
 // The font of a chain that has the character, and its glyph there: the
 // first font's .notdef (glyph 0) if none does.
 fn resolve_glyph(f: Font, cp: u32) -> Font, i32 {
+    let key = ((f.id as u64) << 32) | (cp as u64) + 1;
+    let found = cache_find(cmap_keys, key);
+    if found >= 0 {
+        let v = cmap_vals[found];
+        return Font { (v >> 32) as u32 }, (v & 0xFFFFFFFF) as i32;
+    }
+    let gf, g = resolve_glyph_slow(f, cp);
+    cache_insert(cmap_keys, cmap_vals, cmap_count, key, ((gf.id as u64) << 32) | (g as u32 as u64));
+    return gf, g;
+}
+fn resolve_glyph_slow(f: Font, cp: u32) -> Font, i32 {
     var at = f;
     var steps = 0;
     while at.id != 0 && steps < 16 {
@@ -416,6 +504,16 @@ fn advance_of(f: Font, glyph: i32) -> i32 {
     gm.advance
 }
 
+// The kerning between two glyphs of f (font units), from the table.
+fn kern_of(f: Font, g1: i32, g2: i32) -> i32 {
+    let key = ((f.id as u64) << 32) | ((g1 as u32 as u64) << 16) | (g2 as u32 as u64) + 1;
+    let found = cache_find(kern_keys, key);
+    if found >= 0 { return (kern_vals[found] as u32) as! i32; }
+    let k = kern(f, g1, g2);
+    cache_insert(kern_keys, kern_vals, kern_count, key, k as u32 as u64);
+    k
+}
+
 fn style_font(style: TextStyle) -> Font { if style.font.id != 0 { style.font } else { default_font() } }
 
 // Every glyph of s[from..to] on one line, from pen x 0: F(font, glyph, x)
@@ -425,16 +523,16 @@ fn each_glyph<F>(s: const u8[:], from: i64, to: i64, style: TextStyle) -> f64 {
     var x = 0.0;
     var prev_font = Font { 0 };
     var prev_glyph: i32 = -1;
+    var k = 0.0;            // pixels per font unit of prev_font
     var i = from;
     while i < to {
         let cp, next = decode_utf8(s, i);
         i = next;
         let gf, g = resolve_glyph(f, cp);
-        let m = metrics_of(gf);
-        let k = style.size / m.units_per_em;
-        if prev_glyph >= 0 && prev_font == gf { x += kern(gf, prev_glyph, g) * k; }
+        if gf != prev_font { k = style.size / metrics_of(gf).units_per_em; }
+        if prev_glyph >= 0 && prev_font == gf { x += kern_of(gf, prev_glyph, g) * k; }
         F(gf, g, x);
-        x += advance_of(gf, g) * k + style.letter_spacing;
+        x += glyph_advance(gf, g) * k + style.letter_spacing;
         prev_font = gf;
         prev_glyph = g;
     }
@@ -498,17 +596,31 @@ fn each_line<F>(s: const u8[:], style: TextStyle) {
     }
 }
 
+// s laid out in `style`, once: its lines, each a run of placed glyphs
+// (from pen x 0) and a width, in the two arrays below until the next
+// layout.
+struct PlacedGlyph { font: Font, glyph: i32, x: f32 }
+struct LaidLine { first: i64, end: i64, width: f32 }
+var placed_glyphs: PlacedGlyph[>..<] = [];
+var laid_lines: LaidLine[>..<] = [];
+fn layout(s: const u8[:], style: TextStyle) {
+    placed_glyphs.resize(0);
+    laid_lines.resize(0);
+    each_line(s, style) { a, b =>
+        let first = placed_glyphs.len;
+        let w = each_glyph(s, a, b, style) { gf, g, gx => placed_glyphs.push(PlacedGlyph { gf, g, gx as f32 }); };
+        laid_lines.push(LaidLine { first, placed_glyphs.len, w as f32 });
+    };
+}
+
 // How big s is drawn in `style`: the widest line's width, and the lines'
 // height.
 fn measure_text(s: const u8[:], style: TextStyle) -> float2 {
-    var w = 0.0;
-    var lines = 0;
-    each_line(s, style) { a, b =>
-        w = max(w, line_width(s, a, b, style));
-        lines++;
-    };
+    layout(s, style);
+    var w: f32 = 0.0;
+    for l in laid_lines { w = max(w, l.width); }
     let lh = font_line_height(style_font(style), style.size) * style.line_spacing;
-    float2 { w as f32, (lines * lh) as f32 }
+    float2 { w, (laid_lines.len * lh) as f32 }
 }
 fn measure_text(s: const u8[:], size: f64) -> float2 {
     measure_text(s, TextStyle { size: size as f32 })
@@ -528,9 +640,8 @@ fn text(x: f64, y: f64, s: const u8[:], style: TextStyle, c) {
     let f = style_font(style);
     let lh = font_line_height(f, style.size) * style.line_spacing;
     let ascent = font_ascent(f, style.size);
-    var lines = 0;
-    each_line(s, style) { a, b => lines++; };
-    let height = lines * lh;
+    layout(s, style);
+    let height = laid_lines.len * lh;
     var baseline = match style.baseline {
         BASELINE_MIDDLE => y - height * 0.5 + ascent,
         BASELINE_ALPHABETIC => y,
@@ -543,26 +654,25 @@ fn text(x: f64, y: f64, s: const u8[:], style: TextStyle, c) {
     let plain = m.b == 0.0 && m.c == 0.0 && m.a == 1.0 && m.d == 1.0;
     let k = style.size / BASE_SIZE;
     let stroke = style.outline > 0.0;
-    each_line(s, style) { a, b =>
+    for l in laid_lines {
         var left = x;
         if style.align != ALIGN_LEFT {
-            let w = line_width(s, a, b, style);
-            left = if style.align == ALIGN_CENTER { x - w * 0.5 } else { x - w };
+            left = if style.align == ALIGN_CENTER { x - l.width * 0.5 } else { x - l.width };
         }
         var line_y = baseline;
         if plain { line_y = round(line_y + m.ty) - m.ty; }
-        each_glyph(s, a, b, style) { gf, g, gx =>
-            let slot = glyph_slot(gf, g);
+        for p in placed_glyphs[l.first..l.end] {
+            let slot = glyph_slot(p.font, p.glyph);
             if slot.w > 0 {
                 let hw = slot.w * 0.5;
                 let hh = slot.h * 0.5;
-                let local = mul(translation(left + gx + (slot.xoff + hw) * k, line_y + (slot.yoff + hh) * k),
+                let local = mul(translation(left + p.x + (slot.xoff + hw) * k, line_y + (slot.yoff + hh) * k),
                                 scaling(k));
                 add(KIND_GLYPH, if stroke { FLAG_STROKE } else { 0 }, local,
                     geom(hw, hh, if stroke { style.outline / k } else { 0.0 }, 0.0),
                     geom(slot.x, slot.y, slot.w, slot.h), c);
             }
-        };
+        }
         baseline += lh;
-    };
+    }
 }

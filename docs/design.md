@@ -543,7 +543,13 @@ width, which avoids the flicker that sub-pixel strokes cause.
   outline }`. Text is decoded as UTF-8 (an invalid byte is U+FFFD on its
   own) and kerned through stb_truetype. Lines break at newlines and, with
   a wrap width, at the last space that fits. A word wider than the wrap
-  width gets a line of its own.
+  width gets a line of its own. What the font answers is kept on the
+  Goose side, so a line is laid out without calling into C: the glyph a
+  character resolves to (through the fallbacks) and the kerning of a pair
+  in two hash tables, and a glyph's advance in its atlas slot, which is
+  made the first time the glyph is measured and gets its bitmap the first
+  time it is drawn. `text` and `measure_text` lay the text out once, into
+  arrays of placed glyphs and lines, and draw or measure from those.
 * **No shaping.** Each character is one glyph, so scripts that need
   shaping (Arabic, Devanagari) don't come out right. HarfBuzz behind the
   same API is listed as later work.

@@ -130,10 +130,13 @@ fn main() {
         cp++;
     }
     let again = gfx2d::glyph_slot(f, gfx2d::glyph_index(f, 'A'));
+    fn unplaced(g: i32) -> bool {
+        let at = gfx2d::find_slot(gfx2d::glyph_key(f, g));
+        at >= 0 && !gfx2d::glyph_slots[at].placed && gfx2d::glyph_slots[at].advance > 0
+    }
     print("atlas full: ", gfx2d::atlas_full, " after more than 50 glyphs ", placed > 50, "; A kept ",
           again.x == a.x && again.y == a.y && again.w == a.w, "; the one that did not fit not placed ",
-          gfx2d::find_slot(gfx2d::glyph_key(f, missing)) < 0, ", nor one after it ",
-          gfx2d::glyph_slot(f, later).w == 0 && gfx2d::find_slot(gfx2d::glyph_key(f, later)) < 0);
+          unplaced(missing), ", nor one after it ", gfx2d::glyph_slot(f, later).w == 0 && unplaced(later));
     gfx2d::begin_atlas_frame();
     print("next frame: starts over ", gfx2d::atlas_h == 0 && !gfx2d::atlas_full, ", the missing glyph placed ",
           gfx2d::glyph_slot(f, missing).w > 0, ", and the later one ", gfx2d::glyph_slot(f, later).w > 0);

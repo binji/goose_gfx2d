@@ -155,7 +155,13 @@ and how to check it. Strike items out as they land.
     *Change:* remember what is bound in the pass and bind only what
     changed. *Check:* `sprites_alternating`'s `end` time; the tests.
 
-14. **Text layout crosses into C for every glyph.** `each_glyph` calls
+14. ~~**Text layout crosses into C for every glyph.**~~ Done: record
+    time at the minimum of six interleaved runs, `text_page` 2.6 ms to
+    1.1, `text_wrapped` 4.7 to 1.0, `text_labels` 2.7 to 1.0. The profile
+    before had `kern` (stb's GPOS walk) at 38% and the cmap lookup at 12%;
+    after, nothing from C is in the top of it, and the instance emit
+    (`add`) is the largest piece at 17%. The character's glyph is cached
+    too (a table beside the kerning pairs). `each_glyph` calls
     `kern` and `advance_of` (extern) per glyph, `text()` runs `each_line`
     twice, and an aligned line is measured again before it is drawn. 9,000
     glyphs cost 7.6 ms.

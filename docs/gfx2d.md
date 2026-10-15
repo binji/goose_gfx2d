@@ -192,7 +192,9 @@ Goose program ──► gfx2d (Goose: shapes, paints, paths, text layout, passes
     GPU nor C.
 * **The C layer** (`src/text/`) is nine functions over stb_truetype,
   listed in `text_api.h`:
-  * loading fonts, metrics, glyph lookup and kerning,
+  * loading fonts, metrics, glyph lookup and kerning (each glyph's,
+    pair's and character's answer is kept on the Goose side, so laying
+    out text calls into C only for what it has not seen),
   * rasterizing a glyph's distance field. It renders coverage with
     stb's scanline rasterizer, then runs a linear-time Euclidean distance
     transform (as TinySDF does).
