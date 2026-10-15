@@ -48,7 +48,7 @@ and how to check it. Strike items out as they land.
    *Check:* the `shadow` case in `test/headless/layers.goose`, with the
    shadowed shape touching the target's edge.
 
-5. **The docs have drifted.** `docs/design.md` holds every section from
+5. ~~**The docs have drifted.**~~ Done. `docs/design.md` held every section from
    "Transforms as scopes" through "Paths" twice (the second copy is the
    older sketch, with `alias Path`, `Mesh` and `draw_triangles`), and names
    that never shipped: `set_scale`, `LINEAR_BLENDING`, `crisp()`,

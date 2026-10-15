@@ -66,7 +66,7 @@ let FILTER_NEAREST = 1;     // pixel art
 
 // Paint.blend: how the painted color is blended into the target. The four
 // gfx's fixed-function blending gives; the others (screen, overlay,
-// erase, ...) will come with layers.
+// erase, ...) are layers' (layer.goose), which read what is under them.
 let BLEND_NORMAL = 0;       // over, with alpha
 let BLEND_ADD = 1;          // added, by its alpha: light, glows
 let BLEND_MULTIPLY = 2;     // multiplied: shadows, tinting what is there

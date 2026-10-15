@@ -1,7 +1,11 @@
-// gfx2d: 2D drawing on gfx. Shapes (rectangles, rounded rectangles,
-// circles, ellipses, pies, arcs, rings, lines), filled or outlined, under a
-// current transform, antialiased by their signed distance in the fragment
-// shader. docs/design.md is the plan; this is its first phase.
+// gfx2d: 2D drawing on gfx. This file is the entry: frames and passes, the
+// current transform, the shapes (rectangles, rounded rectangles, circles,
+// ellipses, pies, arcs, rings, lines, box shadows), filled or outlined and
+// antialiased by their signed distance in the fragment shader, images, the
+// drawing of paths, pixel art, and the renderer that uploads a frame and
+// draws it. Colors, transforms, paints, paths, text, clips and layers are
+// the other modules', all in this namespace. docs/gfx2d.md is the
+// reference; docs/design.md the plan and its reasoning.
 //
 // Drawing happens between begin and end, or in frame's block:
 //
