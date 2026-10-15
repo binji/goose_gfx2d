@@ -10,3 +10,8 @@ determinant: 6.0 angle true scales vec2<f32> { 2.0, 3.0 }
 rects: vec2<f32> { 20.0, 15.0 } true false gfx2d::Rect { 20.0, 10.0, 10.0, 5.0 } gfx2d::Rect { 10.0, 0.0, 30.0, 20.0 } gfx2d::Rect { 8.0, 8.0, 24.0, 14.0 }
 bounds: gfx2d::Rect { 15.0, 5.0, 10.0, 20.0 }
 fit: gfx2d::Rect { 0.0, 0.0, 200.0, 200.0 } gfx2d::Rect { 0.0, 50.0, 200.0, 100.0 } gfx2d::Rect { -100.0, 0.0, 400.0, 200.0 }
+in_rect: true false flipped true
+in_rounded_rect: true corner false edge true
+in_circle: true false; in_ellipse: true false
+camera: center to vec2<f32> { 400.0, 300.0 }, a unit right of it to vec2<f32> { 400.0, 298.0 }
+and back: vec2<f32> { 123.0, -45.0 }

@@ -7,8 +7,10 @@ images), transforms, anti-aliasing and text. goose_gfx's own docs list "a 2D
 immediate-mode layer in Goose on top of this one, as Lobster has" as
 follow-up work. This package is that layer.
 
-This document is the plan. Its API sketches show the intended shape of the
-calls, and names may change during implementation.
+This document is the plan the library was built from, with the reasoning
+behind its decisions. Its API sketches show the intended shape of the
+calls, and some names changed during implementation. All six phases are
+done; [gfx2d.md](gfx2d.md) is the reference for what was built.
 
 **gfx2d uses goose_gfx as it is.** It needs no stencil, no extra blend
 factors and no new calls. Everything here uses `gfx`'s current API: its
@@ -1011,8 +1013,9 @@ Ordered by value to typical users. The first group belongs in v1.
 5. **Clip and layers** (done): analytic and path clips, layers with group
    opacity, every blend mode, blur and drop shadows, `box_shadow`,
    multisampled frames, and `examples/layers.goose`.
-6. **Polish**: camera and hit testing, pixel-art mode, statistics, the
-   showcase, and docs (`docs/gfx2d.md` written as goose_gfx's `gfx.md` is).
+6. **Polish** (done): the camera and hit testing, pixel-art mode
+   (`antialias`, `pixel_canvas`), statistics, the showcase with its
+   window test runner, `examples/pixel_art.goose`, and `docs/gfx2d.md`.
 
 ## Decisions
 

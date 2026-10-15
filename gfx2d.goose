@@ -54,6 +54,8 @@ let FLAG_HARD_LEFT: u32 = 2;
 let FLAG_HARD_TOP: u32 = 4;
 let FLAG_HARD_RIGHT: u32 = 8;
 let FLAG_HARD_BOTTOM: u32 = 16;
+// No antialiasing: a pixel is covered or not, by its center (antialias()).
+let FLAG_ALIASED: u32 = 32;
 
 // One shape, as the shaders read it from a storage buffer: std430 lays
 // these fields out with no padding, 112 bytes.
@@ -201,6 +203,8 @@ struct Pass {
     clear_color: float4,
     first_batch: i64,
     end_batch: i64,
+    width: i64,             // the target's size, which draws are placed in
+    height: i64,
     src: gfx::Texture,
     blur: BlurUniforms,
 }
@@ -214,6 +218,7 @@ struct FrameState {
     transform: Affine,
     pass: i64,              // the draw pass draws go into now
     clip: u32,              // the clip they are under; 0: none
+    aliased: bool,          // antialiasing off
 }
 var state = FrameState { transform: IDENTITY, .. };
 
@@ -275,7 +280,7 @@ fn begin_into(target: gfx::Texture, clear: bool, clear_color: Color, samples: i6
     ensure_renderer();
     let info = gfx::texture_info(target);
     state = FrameState { drawing: true, target: target, width: info.width, height: info.height,
-                         transform: IDENTITY, pass: 0, clip: 0 };
+                         transform: IDENTITY, pass: 0, clip: 0, aliased: false };
     for &t in pool { t.used = false; }
     passes.resize(0);
     composites.resize(0);
@@ -289,10 +294,12 @@ fn begin_into(target: gfx::Texture, clear: bool, clear_color: Color, samples: i6
         let msaa = pooled(info.width, info.height, info.format, samples as i32);
         if !clear { blur_pass(target, msaa, float2_0, 0.0); }
         passes.push(Pass { kind: PASS_DRAW, target: msaa, resolve: target, samples: samples as i32,
-                           clear: clear, clear_color: premultiplied(clear_color), .. });
+                           clear: clear, clear_color: premultiplied(clear_color), width: info.width,
+                           height: info.height, .. });
     } else {
         passes.push(Pass { kind: PASS_DRAW, target: target, samples: 1, clear: clear,
-                           clear_color: premultiplied(clear_color), .. });
+                           clear_color: premultiplied(clear_color), width: info.width,
+                           height: info.height, .. });
     }
     state.pass = passes.len - 1;
     instances.resize(0);
@@ -324,11 +331,14 @@ fn end() {
 // The current draw pass ends at the batches so far.
 fn close_pass() { passes[state.pass].end_batch = batches.len; }
 
-// Draws go into `target` from now on, in a pass of its own.
-fn open_pass(target: gfx::Texture, resolve: gfx::Texture, samples: i32, clear: bool) {
+// Draws go into `target`, of the frame's current size, from now on, in a
+// pass of its own; cleared to clear_color (premultiplied) if `clear`.
+fn open_pass(target: gfx::Texture, resolve: gfx::Texture, samples: i32, clear: bool,
+             clear_color: float4 = float4_0) {
     close_pass();
     passes.push(Pass { kind: PASS_DRAW, target: target, resolve: resolve, samples: samples,
-                       clear: clear, first_batch: batches.len, end_batch: batches.len, .. });
+                       clear: clear, clear_color: clear_color, first_batch: batches.len,
+                       end_batch: batches.len, width: state.width, height: state.height, .. });
     state.pass = passes.len - 1;
 }
 
@@ -336,8 +346,8 @@ fn open_pass(target: gfx::Texture, resolve: gfx::Texture, samples: i32, clear: b
 // for 0, into `target`, in a pass of its own between the draw passes.
 fn blur_pass(src: gfx::Texture, target: gfx::Texture, dir: float2, sigma: f32) {
     passes.push(Pass { kind: PASS_BLUR, target: target, samples: 1, src: src,
-                       blur: BlurUniforms { dir: dir, sigma: sigma },
-                       first_batch: batches.len, end_batch: batches.len, .. });
+                       blur: BlurUniforms { dir: dir, sigma: sigma }, width: state.width,
+                       height: state.height, first_batch: batches.len, end_batch: batches.len, .. });
 }
 
 // Whether the current pass antialiases by samples, so paths need no fringe.
@@ -434,9 +444,9 @@ fn flush_batches() {
     let atlas = upload_atlas();
     let ramps = if renderer.ramp_rows > 0 { renderer.ramps } else { renderer.white };
     let glyphs = if atlas.id != 0 { atlas } else { renderer.white };
-    let view = float4 { state.width, state.height, 0.0, 0.0 };
     let linear = renderer.samplers[2];      // linear, clamped
     for p in passes {
+        let view = float4 { p.width, p.height, 0.0, 0.0 };
         // A draw pass with nothing to draw that clears nothing is no pass.
         if p.kind == PASS_DRAW && p.end_batch == p.first_batch && !p.clear { continue; }
         var desc = gfx::PassDesc { clear_color: p.clear, color_value: p.clear_color, .. };
@@ -617,8 +627,9 @@ fn drawing() -> bool {
 
 // Records one shape: `local` places its local space under the current
 // transform. A Color paints it alone; a Paint as paint.goose says.
-fn add(kind: u32, flags: u32, local: Affine, geom: float4, radii: float4, c) {
+fn add(kind: u32, shape_flags: u32, local: Affine, geom: float4, radii: float4, c) {
     guard drawing();
+    let flags = if state.aliased { shape_flags | FLAG_ALIASED } else { shape_flags };
     let k = paint_key(c);
     let m = mul(state.transform, local);
     instances.push(Instance { m: float4 { m.a, m.b, m.c, m.d }, t: float2 { m.tx, m.ty },
@@ -711,6 +722,73 @@ fn to_local(p: float2) -> float2 {
     apply(inv, p)
 }
 fn to_pixels(p: float2) -> float2 { apply(state.transform, p) }
+// The mouse in the current transform's space: under a camera, the world.
+fn mouse_local() -> float2 { to_local(gfx::mouse_pos()) }
+
+// The block drawn under the camera: the world as it shows in the target.
+fn camera<F>(cam: Camera2D) {
+    transform(camera_transform(cam, rect_of(0, 0, state.width, state.height))) { F(); };
+}
+
+// --- antialiasing and pixel art -----------------------------------------------------------
+
+// Antialiasing on or off for what is drawn from now on (it is on at
+// begin()). Off, a pixel is covered or not by its center: shapes, text
+// and paths have hard edges, paths no fringe, and images not told
+// otherwise are sampled nearest. Clips keep theirs.
+fn set_antialias(on: bool) { state.aliased = !on; }
+fn antialias<F>(on: bool) {
+    let was = state.aliased;
+    state.aliased = !on;
+    F();
+    state.aliased = was;
+}
+
+// How a pixel canvas of w x h fits the current target: scaled by the
+// largest whole number that fits (or shrunk to fit, if none does) and
+// centered; this takes the canvas's pixels to the target's.
+fn pixel_canvas_fit(w: i64, h: i64) -> Affine { pixel_canvas_fit(w, h, state.width, state.height) }
+fn pixel_canvas_fit(w: i64, h: i64, target_w: i64, target_h: i64) -> Affine {
+    let fit = min(target_w / (w as f64), target_h / (h as f64));
+    let k = if fit >= 1.0 { floor(fit) } else { fit };
+    Affine { k as f32, 0.0, 0.0, k as f32, floor((target_w - w * k) * 0.5) as f32,
+             floor((target_h - h * k) * 0.5) as f32 }
+}
+// A point in the target's pixels (the mouse's) in a pixel canvas's.
+fn to_canvas(p: float2, w: i64, h: i64) -> float2 {
+    let inv, ok = invert(pixel_canvas_fit(w, h, gfx::screen_size().x, gfx::screen_size().y));
+    if ok { apply(inv, p) } else { p }
+}
+
+// The block drawn at w x h pixels, with antialiasing off, cleared to
+// `clear`, and then drawn into the target scaled up by a whole number with
+// no smoothing, centered (pixel_canvas_fit): a pixel-art game's screen.
+// Inside, the target is the canvas: its size is w x h, and transforms, clips
+// and layers start afresh.
+fn pixel_canvas<F>(w: i64, h: i64, clear: Color) {
+    guard drawing();
+    let back = passes[state.pass];
+    let outer = state;
+    let canvas = pooled(w, h, gfx::RGBA8, 1);
+    state.width = w;
+    state.height = h;
+    state.transform = IDENTITY;
+    state.clip = 0;
+    state.aliased = true;
+    open_pass(canvas, gfx::Texture { 0 }, 1, true, premultiplied(clear));
+    F();
+    close_pass();
+    state.width = outer.width;
+    state.height = outer.height;
+    state.clip = outer.clip;
+    state.aliased = outer.aliased;
+    open_pass(back.target, back.resolve, back.samples, false);
+    let fit = pixel_canvas_fit(w, h);
+    state.transform = IDENTITY;
+    draw_image(canvas, Rect { fit.tx, fit.ty, w * fit.a, h * fit.d }, rect_of(0, 0, w, h), false,
+               WHITE, FILTER_NEAREST, 0);
+    state.transform = outer.transform;
+}
 
 // --- shapes ------------------------------------------------------------------------------
 //
@@ -874,23 +952,29 @@ fn texture_rect(t: gfx::Texture) -> Rect {
 }
 
 // The whole texture at (x, y), at its size in pixels.
-fn image(t: gfx::Texture, x: f64, y: f64, tint: Color = WHITE, filter: i64 = FILTER_LINEAR) {
+fn image(t: gfx::Texture, x: f64, y: f64, tint: Color = WHITE, filter: i64 = FILTER_DEFAULT) {
     let whole = texture_rect(t);
     draw_image(t, rect_of(x, y, whole.w, whole.h), whole, false, tint, filter, 0);
 }
 // The whole texture, stretched over dst.
-fn image(t: gfx::Texture, dst: Rect, tint: Color = WHITE, filter: i64 = FILTER_LINEAR) {
+fn image(t: gfx::Texture, dst: Rect, tint: Color = WHITE, filter: i64 = FILTER_DEFAULT) {
     draw_image(t, dst, texture_rect(t), false, tint, filter, 0);
 }
 // The part `src` of the texture (pixels: a sprite in a sheet) over dst. A
 // negative dst.w or dst.h flips it.
 fn image(t: gfx::Texture, dst: Rect, src: Rect, tint: Color = WHITE,
-         filter: i64 = FILTER_LINEAR) {
+         filter: i64 = FILTER_DEFAULT) {
     draw_image(t, dst, src, true, tint, filter, 0);
 }
 
-fn draw_image(t: gfx::Texture, dst: Rect, src: Rect, part: bool, tint: Color, filter: i64,
+// FILTER_LINEAR, or FILTER_NEAREST with antialiasing off: what images are
+// drawn with when a call does not say.
+let FILTER_DEFAULT = -1;
+
+fn draw_image(t: gfx::Texture, dst: Rect, src: Rect, part: bool, tint: Color, chosen: i64,
               hard: u32) {
+    let filter = if chosen != FILTER_DEFAULT { chosen } else if state.aliased { FILTER_NEAREST }
+                 else { FILTER_LINEAR };
     guard src.w != 0.0 && src.h != 0.0 else { return; }
     let placement = Affine { dst.w / src.w, 0.0, 0.0, dst.h / src.h, dst.x, dst.y };
     let img = Image { texture: t, placement: placement,
@@ -906,7 +990,7 @@ fn draw_image(t: gfx::Texture, dst: Rect, src: Rect, part: bool, tint: Color, fi
 // the middle both ways. For panels and buttons whose borders must not
 // stretch.
 fn nine_slice(t: gfx::Texture, dst: Rect, src: Rect, insets: float4, tint: Color = WHITE,
-              filter: i64 = FILTER_LINEAR) {
+              filter: i64 = FILTER_DEFAULT) {
     let sx: f32[4] = [src.x, src.x + insets.x, src.x + src.w - insets.z, src.x + src.w];
     let sy: f32[4] = [src.y, src.y + insets.y, src.y + src.h - insets.w, src.y + src.h];
     let dx: f32[4] = [dst.x, dst.x + insets.x, dst.x + dst.w - insets.z, dst.x + dst.w];
@@ -929,7 +1013,7 @@ fn nine_slice(t: gfx::Texture, dst: Rect, src: Rect, insets: float4, tint: Color
 }
 // The whole texture as the nine-slice.
 fn nine_slice(t: gfx::Texture, dst: Rect, insets: float4, tint: Color = WHITE,
-              filter: i64 = FILTER_LINEAR) {
+              filter: i64 = FILTER_DEFAULT) {
     nine_slice(t, dst, texture_rect(t), insets, tint, filter);
 }
 
@@ -955,7 +1039,7 @@ var tess_out: TessVertex[>..<] = [];
 var tess_idx: u32[>..<] = [];
 
 // How wide a fringe paths get: a pixel, or none where samples antialias.
-fn fringe() -> f32 { if multisampled() { 0.0 } else { 1.0 } }
+fn fringe() -> f32 { if multisampled() || state.aliased { 0.0 } else { 1.0 } }
 
 // The current transform's scale: how many pixels a unit is, on average.
 fn pixel_scale() -> f32 { sqrt(abs(determinant(state.transform))) }

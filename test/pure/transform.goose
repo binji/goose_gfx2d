@@ -55,4 +55,24 @@ fn main() {
     print("fit: ", gfx2d::transformed_bounds(gfx2d::fit(src, dst, gfx2d::FIT_STRETCH), src), " ",
           gfx2d::transformed_bounds(gfx2d::fit(src, dst, gfx2d::FIT_CONTAIN), src), " ",
           gfx2d::transformed_bounds(gfx2d::fit(src, dst, gfx2d::FIT_COVER), src));
+
+    // Hit testing, in the shape's own space.
+    print("in_rect: ", gfx2d::in_rect(10, 10, 20, 10, float2 { 15, 15 }), " ",
+          gfx2d::in_rect(10, 10, 20, 10, float2 { 30, 15 }), " flipped ",
+          gfx2d::in_rect(30, 20, -20, -10, float2 { 15, 15 }));
+    print("in_rounded_rect: ", gfx2d::in_rounded_rect(0, 0, 100, 50, 20, float2 { 50, 25 }), " corner ",
+          gfx2d::in_rounded_rect(0, 0, 100, 50, 20, float2 { 2, 2 }), " edge ",
+          gfx2d::in_rounded_rect(0, 0, 100, 50, 20, float2 { 50, 1 }));
+    print("in_circle: ", gfx2d::in_circle(0, 0, 10, float2 { 7, 7 }), " ", gfx2d::in_circle(0, 0, 10, float2 { 8, 7 }),
+          "; in_ellipse: ", gfx2d::in_ellipse(0, 0, 20, 5, float2 { 19, 0 }), " ",
+          gfx2d::in_ellipse(0, 0, 20, 5, float2 { 0, 6 }));
+
+    // A camera: its center in the middle of the viewport, zoomed, turned;
+    // and back.
+    let view = gfx2d::Rect { 0, 0, 800, 600 };
+    let cam = gfx2d::Camera2D { center: float2 { 100, 50 }, zoom: 2, rotation: PI / 2 };
+    print("camera: center to ", rounded(gfx2d::world_to_screen(cam, view, float2 { 100, 50 })),
+          ", a unit right of it to ", rounded(gfx2d::world_to_screen(cam, view, float2 { 101, 50 })));
+    let back = gfx2d::screen_to_world(cam, view, gfx2d::world_to_screen(cam, view, float2 { 123, -45 }));
+    print("and back: ", rounded(back));
 }

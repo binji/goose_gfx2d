@@ -83,6 +83,7 @@ void main() {
         d = abs(d) - max(width, px) * 0.5;
     }
     float coverage = clamp(0.5 - d / px, 0.0, 1.0) * k;
+    if ((v_flags & FLAG_ALIASED) != 0u) coverage = d < 0.0 ? min(k * 1e6, 1.0) : 0.0;
     if (v_kind == KIND_SHADOW) coverage = box_shadow(p, v_geom.xy, v_radii.x, max(v_geom.z, 1e-3));
     coverage *= clip_coverage(v_clip, gl_FragCoord.xy);
 

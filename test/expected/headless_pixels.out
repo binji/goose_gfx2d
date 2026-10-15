@@ -1,0 +1,9 @@
+aliased: 0 partly covered pixels, true covered
+antialiased, by contrast: true
+after the block: true
+nearest: 255,0,0,255 0,255,0,255 0,0,255,255; linear: true
+canvas fit: 3.0x at 4.0, 19.0
+canvas: corner 255,0,0,255 255,0,0,255 next 0,0,255,255; far corner 0,255,0,255 0,255,0,255; letterbox 32,32,32,255 32,32,32,255
+each canvas pixel a 3x3 block: true
+camera: 255,255,255,255 0,0,0,255 255,255,255,255 0,0,0,255
+mouse_local: vec2<f32> { 20.0, 20.0 }

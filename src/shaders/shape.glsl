@@ -53,3 +53,4 @@ const uint FLAG_HARD_LEFT = 2u;
 const uint FLAG_HARD_TOP = 4u;
 const uint FLAG_HARD_RIGHT = 8u;
 const uint FLAG_HARD_BOTTOM = 16u;
+const uint FLAG_ALIASED = 32u;

@@ -129,3 +129,55 @@ fn fit(src: Rect, dst: Rect, mode: i64) -> Affine {
     let s = center(src);
     Affine { sx, 0.0, 0.0, sy, c.x - s.x * sx, c.y - s.y * sy }
 }
+
+// --- hit testing --------------------------------------------------------------------------
+//
+// Whether a point is inside a shape, in the same space as the shape: with
+// gfx2d.goose's mouse_local() under the transform the shape was drawn in.
+
+fn in_rect(x: f64, y: f64, w: f64, h: f64, p: float2) -> bool {
+    p.x >= min(x, x + w) && p.x < max(x, x + w) && p.y >= min(y, y + h) && p.y < max(y, y + h)
+}
+fn in_rounded_rect(x: f64, y: f64, w: f64, h: f64, r: f64, p: float2) -> bool {
+    let hw = abs(w) * 0.5;
+    let hh = abs(h) * 0.5;
+    let rr = clamp(r, 0.0, min(hw, hh));
+    let qx = abs(p.x - (x + w * 0.5)) - hw + rr;
+    let qy = abs(p.y - (y + h * 0.5)) - hh + rr;
+    let outside = sqrt(max(qx, 0.0) * max(qx, 0.0) + max(qy, 0.0) * max(qy, 0.0));
+    min(max(qx, qy), 0.0) + outside - rr < 0.0
+}
+fn in_circle(cx: f64, cy: f64, r: f64, p: float2) -> bool {
+    (p.x - cx) * (p.x - cx) + (p.y - cy) * (p.y - cy) < r * r
+}
+fn in_ellipse(cx: f64, cy: f64, rx: f64, ry: f64, p: float2) -> bool {
+    if rx == 0.0 || ry == 0.0 { return false; }
+    let u = (p.x - cx) / rx;
+    let v = (p.y - cy) / ry;
+    u * u + v * v < 1.0
+}
+
+// --- a 2D camera ---------------------------------------------------------------------------
+
+// What a 2D game sees: `center` of the world in the middle of the viewport,
+// `zoom` pixels to a world unit, turned by `rotation` (the world turns the
+// other way).
+struct Camera2D {
+    center: float2 = float2 { 0.0, 0.0 },
+    zoom: f32 = 1.0,
+    rotation: f32 = 0.0,
+}
+
+// The world to the viewport's pixels.
+fn camera_transform(cam: Camera2D, viewport: Rect) -> Affine {
+    let c = center(viewport);
+    mul(mul(translation(c.x, c.y), rotation(-cam.rotation)),
+        mul(scaling(cam.zoom), translation(-cam.center.x, -cam.center.y)))
+}
+fn world_to_screen(cam: Camera2D, viewport: Rect, p: float2) -> float2 {
+    apply(camera_transform(cam, viewport), p)
+}
+fn screen_to_world(cam: Camera2D, viewport: Rect, p: float2) -> float2 {
+    let inv, ok = invert(camera_transform(cam, viewport));
+    if ok { apply(inv, p) } else { p }
+}
