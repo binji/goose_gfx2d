@@ -60,6 +60,8 @@ where it shows:
 | `big_path` | one large outline: band tessellation at scale |
 | `big_path_retained` | the same as a mesh made once: what drawing a retained mesh costs |
 | `self_crossing` | crossings: the band sweep's splitting at intersections |
+| `many_contours` | thousands of contours in one path: the fringe's fill-side test per contour |
+| `stripes` | hundreds of spans in each of hundreds of bands: matching spans to open trapezoids |
 | `chart` | long polylines, opaque: strokes emitted straight from the lines |
 | `chart_translucent` | the same half transparent: the stroker's outlines and the tessellation of long ones |
 | `dashed` | dashing, round caps, and curves flattened for strokes |

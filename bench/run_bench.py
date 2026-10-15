@@ -39,6 +39,8 @@ CASES = {
     "big_path": "one 5,000-point noisy outline, filled",
     "big_path_retained": "the same tessellated once and drawn as a mesh",
     "self_crossing": "150 random points, about 5,000 crossings, even-odd",
+    "many_contours": "one path of 2,000 small diamonds",
+    "stripes": "one path of 400 slanted stripes across the target",
     "chart": "20 polylines of 1,000 points, round joins",
     "chart_translucent": "the same half transparent: outlined and swept",
     "dashed": "500 dashed circles",

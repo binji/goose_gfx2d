@@ -59,3 +59,9 @@ svg curves: true, 8 elements, pen at vec2<f32> { 20.0, 50.0 }, bounds gfx2d::Rec
 svg numbers: true Line { vec2<f32> { 10.0, -2.5 } }
 svg arc: false, junk: false, leading number: false
 warped: gfx2d::Rect { 0.0, 0.0, 20.0, 10.0 } area 100.0
+diamond grid: ok
+diamond grid, even-odd: ok
+diamond grid, fringe: ok
+diamond grid, even-odd fringe: ok
+stripes: ok
+stripes, fringe: ok

@@ -507,18 +507,45 @@ fn filled(winding: i64, rule: i64) -> bool {
 // The winding number of the closed contours about q.
 fn winding_at(pts: const float2[:], contours: const Contour[:], q: float2) -> i64 {
     var w = 0;
-    for c in contours {
-        for i in c.count {
-            let a = pts[c.first + i];
-            let b = pts[c.first + (i + 1) % c.count];
-            if a.y <= q.y {
-                if b.y > q.y && cross2(b - a, q - a) > 0.0 { w++; }
-            } else if b.y <= q.y && cross2(b - a, q - a) < 0.0 {
-                w--;
-            }
+    for c in contours { w += winding_of(pts, c, q); }
+    w
+}
+fn winding_of(pts: const float2[:], c: Contour, q: float2) -> i64 {
+    var w = 0;
+    for i in c.count {
+        let a = pts[c.first + i];
+        let b = pts[c.first + (i + 1) % c.count];
+        if a.y <= q.y {
+            if b.y > q.y && cross2(b - a, q - a) > 0.0 { w++; }
+        } else if b.y <= q.y && cross2(b - a, q - a) < 0.0 {
+            w--;
         }
     }
     w
+}
+// The same, given each contour's box (x0, y0, x1, y1): a closed contour
+// winds no times about a point outside its box, so only the contours
+// whose box holds q are walked.
+fn winding_in_boxes(pts: const float2[:], contours: const Contour[:], boxes: const float4[:], q: float2) -> i64 {
+    var w = 0;
+    for c, ci in contours {
+        let b = boxes[ci];
+        if q.x < b.x || q.y < b.y || q.x > b.z || q.y > b.w { continue; }
+        w += winding_of(pts, c, q);
+    }
+    w
+}
+var tess_boxes: float4[>..<] = [];
+fn contour_boxes(pts: const float2[:], contours: const Contour[:], boxes: float4[>..<]&) {
+    boxes.resize(0);
+    for c in contours {
+        var b = float4 { 1e30, 1e30, -1e30, -1e30 };
+        for i in c.count {
+            let p = pts[c.first + i];
+            b = float4 { min(b.x, p.x), min(b.y, p.y), max(b.z, p.x), max(b.w, p.y) };
+        }
+        boxes.push(b);
+    }
 }
 
 // Whether q is inside the path, by `rule`.
@@ -584,7 +611,9 @@ fn fringe_normal(pts: const float2[:], c: Contour, i: i64, side: f32) -> float2 
 // Which side of contour c the fill is on, by testing just beside the
 // middle of its longest edge: +1 for the left of its direction, -1 for the
 // right, 0 for neither (an edge with fill or with none on both sides).
-fn fill_side(pts: const float2[:], contours: const Contour[:], c: Contour, rule: i64,
+// `boxes` are the contours' (contour_boxes), so that only the ones around
+// the test points are asked.
+fn fill_side(pts: const float2[:], contours: const Contour[:], boxes: const float4[:], c: Contour, rule: i64,
              scale: f32) -> f32 {
     var best = 0;
     var best_len: f32 = -1.0;
@@ -596,8 +625,8 @@ fn fill_side(pts: const float2[:], contours: const Contour[:], c: Contour, rule:
     let b = pts[c.first + (best + 1) % c.count];
     let mid = (a + b) * float2 { 0.5, 0.5 };
     let off = perp(unit(b - a)) * float2 { 0.01 * scale, 0.01 * scale };
-    let left = filled(winding_at(pts, contours, mid + off), rule);
-    let right = filled(winding_at(pts, contours, mid - off), rule);
+    let left = filled(winding_in_boxes(pts, contours, boxes, mid + off), rule);
+    let right = filled(winding_in_boxes(pts, contours, boxes, mid - off), rule);
     if left && !right { return 1.0; }
     if right && !left { return -1.0; }
     0.0
@@ -628,6 +657,7 @@ var tess_ys: f32[>..<] = [];
 var tess_active: Edge[>..<] = [];
 var tess_band: Crossing[>..<] = [];
 var tess_open: OpenTrap[>..<] = [];
+var tess_trap_of: i32[>..<] = [];       // by edge id: the open trapezoid it is the left of, or -1
 
 // Past this much work (edges looked at, band after band) or this many
 // vertices out, a fill gives up, drawing what it has, rather than take
@@ -659,9 +689,10 @@ fn fill_triangles(pts: const float2[:], contours: const Contour[:], rule: i64, f
     fill_bands(pts, contours, rule, out, idx);
     if fringe > 0.0 {
         let half = fringe * 0.5;
+        contour_boxes(pts, contours, tess_boxes);
         for c in contours {
             if c.count < 3 { continue; }
-            let side = fill_side(pts, contours, c, rule, fringe);
+            let side = fill_side(pts, contours, tess_boxes, c, rule, fringe);
             if side == 0.0 { continue; }
             // From the edge, where the fill's own triangles stop and a pixel
             // is half covered, to half a pixel out, uncovered.
@@ -732,6 +763,8 @@ fn fill_bands(pts: const float2[:], contours: const Contour[:], rule: i64,
     sort(tess_ys);
     tess_active.resize(0);
     tess_open.resize(0);
+    tess_trap_of.resize(0);
+    tess_trap_of.resize(tess_edges.len, -1);
     var work = 0;
     var next = 0;
     var k = 0;
@@ -796,7 +829,9 @@ fn fill_bands(pts: const float2[:], contours: const Contour[:], rule: i64,
 
 // The band from ya's filled spans: each continues the open trapezoid of
 // the same two edges, or starts one; open trapezoids no span continued end
-// at ya.
+// at ya. An edge is the left of at most one span in a band, so the open
+// trapezoid a span continues is found through its left edge
+// (tess_trap_of), not by searching them all.
 fn band_spans(rule: i64, ya: f32, out: TessVertex[>..<]&, idx: u32[>..<]&) {
     for &t in tess_open { t.seen = false; }
     var winding = 0;
@@ -808,24 +843,25 @@ fn band_spans(rule: i64, ya: f32, out: TessVertex[>..<]&, idx: u32[>..<]&) {
         if !was && now {
             left = c.edge;
         } else if was && !now {
-            var found = false;
-            for &t in tess_open {
-                if t.left == left && t.right == c.edge {
-                    t.seen = true;
-                    found = true;
-                    break;
-                }
+            let t = tess_trap_of[left];
+            if t >= 0 && tess_open[t].right == c.edge {
+                tess_open[t].seen = true;
+            } else {
+                tess_open.push(OpenTrap { left, c.edge, ya, true });
+                tess_trap_of[left] = (tess_open.len - 1) as i32;
             }
-            if !found { tess_open.push(OpenTrap { left, c.edge, ya, true }); }
         }
     }
-    // The ones not continued, out; the rest kept, in order.
+    // The ones not continued, out; the rest kept, in order, and found
+    // where they are now.
     var w = 0;
-    for t in tess_open {
+    for t, i in tess_open {
         if t.seen {
             tess_open[w] = t;
+            tess_trap_of[t.left] = w as i32;
             w++;
         } else {
+            if tess_trap_of[t.left] == i as i32 { tess_trap_of[t.left] = -1; }
             emit_trap(t, ya, out, idx);
         }
     }

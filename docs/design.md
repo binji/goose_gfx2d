@@ -368,7 +368,9 @@ Goose's namespaces design leaves for later).
   into horizontal bands at every vertex's y and every crossing. Within a
   band, sorted by x at its middle, the fill rule picks the spans. A span
   bounded by the same two edges as one in the band above continues that
-  span's trapezoid, so a trapezoid is emitted only when its edges change,
+  span's trapezoid (found through its left edge, which is the left of at
+  most one open trapezoid, so a band costs its spans, not their square),
+  so a trapezoid is emitted only when its edges change,
   and the output is close to linear in the outline's size. (Without that,
   a 5,000-point outline made 500,000 triangles; with it, 20,000.) The
   sweep has a work budget: a path that crosses itself millions of times
@@ -376,7 +378,10 @@ Goose's namespaces design leaves for later).
   out of memory. The trapezoids tile the fill exactly, and an
   outward fringe half a pixel wide (alpha ½ to 0) is added along each
   contour on the side away from the fill. The side is found by testing
-  the winding number just beside one edge. So these fills come out about
+  the winding number just beside one edge, over the contours whose box
+  holds the test point (a closed contour winds no times about a point
+  outside its box), so a path of thousands of small contours pays for
+  the few around each, not all of them. So these fills come out about
   ⅛ px per unit of outline larger than exact, with slightly crisper edges
   than the analytic shapes.
 * **Stroke** (`stroke(path, width, paint)` or

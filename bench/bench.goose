@@ -268,6 +268,40 @@ fn self_crossing() {
     gfx2d::fill(p, gfx2d::rgba(0xCC3366, 0.5), gfx2d::EVEN_ODD);
 }
 
+// One path of 2,000 small diamonds: the band tessellator, and the fringe's
+// fill-side test for each contour, which once asked every other contour.
+fn many_contours() {
+    var p = gfx2d::Path {};
+    for j in 40 {
+        for i in 50 {
+            let x = 20 + i * 38;
+            let y = 14 + j * 26;
+            gfx2d::move_to(p, x, y - 8);
+            gfx2d::line_to(p, x + 10, y);
+            gfx2d::line_to(p, x, y + 8);
+            gfx2d::line_to(p, x - 10, y);
+            gfx2d::close(p);
+        }
+    }
+    gfx2d::fill(p, gfx2d::rgba(0x3366CC, 1.0));
+}
+
+// One path of 400 slanted stripes across the target: hundreds of spans in
+// each of hundreds of bands, which once matched each span to the open
+// trapezoids by a linear search.
+fn stripes() {
+    var p = gfx2d::Path {};
+    for i in 400 {
+        let x = i * 4.7;
+        gfx2d::move_to(p, x, 0);
+        gfx2d::line_to(p, x + 2, 0);
+        gfx2d::line_to(p, x + 2 + 200, H);
+        gfx2d::line_to(p, x + 200, H);
+        gfx2d::close(p);
+    }
+    gfx2d::fill(p, gfx2d::rgba(0x33CC66, 1.0));
+}
+
 // A chart: 20 series of 1,000 points each, round joins. Opaque, so the
 // strokes are emitted straight from the lines.
 fn chart() { chart_lines(1.0); }
@@ -528,6 +562,8 @@ fn main() {
     run("big_path") { f => big_path(); };
     run("big_path_retained") { f => big_path_retained(f); };
     run("self_crossing") { f => self_crossing(); };
+    run("many_contours") { f => many_contours(); };
+    run("stripes") { f => stripes(); };
     run("chart") { f => chart(); };
     run("chart_translucent") { f => chart_translucent(); };
     run("dashed") { f => dashed(); };

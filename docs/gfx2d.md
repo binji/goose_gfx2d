@@ -241,8 +241,10 @@ Goose program ──► gfx2d (Goose: shapes, paints, paths, text layout, passes
 * **Paths:** curves are flattened after the transform, then tessellated:
   * a convex contour becomes a fan with an exact one-pixel fringe;
   * anything else is cut into bands at vertices and crossings, with spans
-    by the fill rule merged into trapezoids while their edges continue,
-    plus an outward half-pixel fringe;
+    by the fill rule merged into trapezoids while their edges continue
+    (each span finds its trapezoid through its left edge), plus an
+    outward half-pixel fringe, whose side is tested against the contours
+    around the point only;
   * an opaque stroke is emitted straight from the line: a quad a segment,
     a fan at each join's outer corner, caps, and a fringe along the edges,
     since where it overlaps itself the second drawing does not show;

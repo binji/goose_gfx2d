@@ -359,4 +359,50 @@ fn main() {
     gfx2d::rect(w, 0, 0, 10, 10);
     gfx2d::warp(w) { q => q + float2 { q.y, 0 } };
     print("warped: ", gfx2d::bounds(w), " area ", fill_area(w, gfx2d::NONZERO, 0));
+
+    // Many contours in one path: a grid of diamonds, some with a hole, and
+    // slanted stripes, with the fringe (whose side test asks only the
+    // contours around a point) and without.
+    var grid = gfx2d::Path {};
+    for j in 10 {
+        for i in 10 {
+            let x = 20.0 + i * 30;
+            let y = 20.0 + j * 30;
+            gfx2d::move_to(grid, x, y - 10);
+            gfx2d::line_to(grid, x + 10, y);
+            gfx2d::line_to(grid, x, y + 10);
+            gfx2d::line_to(grid, x - 10, y);
+            gfx2d::close(grid);
+            if (i + j) % 3 == 0 {
+                // A hole, wound the other way.
+                gfx2d::move_to(grid, x - 2, y - 2);
+                gfx2d::line_to(grid, x - 2, y + 2);
+                gfx2d::line_to(grid, x + 2, y + 2);
+                gfx2d::line_to(grid, x + 2, y - 2);
+                gfx2d::close(grid);
+            }
+        }
+    }
+    let holes = 34.0;
+    let grid_area = 100 * 200 - holes * 16;
+    // A fringe adds an eighth of a pixel per unit of edge, outward from
+    // the fill on both kinds of contour.
+    let grid_edges = 100 * 4 * sqrt(200.0) + holes * 16;
+    check("diamond grid", fill_area(grid, gfx2d::NONZERO, 0), grid_area, 0.5);
+    check("diamond grid, even-odd", fill_area(grid, gfx2d::EVEN_ODD, 0), grid_area, 0.5);
+    check("diamond grid, fringe", fill_area(grid, gfx2d::NONZERO, 1) - grid_area, grid_edges * 0.125, grid_edges * 0.03);
+    check("diamond grid, even-odd fringe", fill_area(grid, gfx2d::EVEN_ODD, 1) - grid_area, grid_edges * 0.125,
+          grid_edges * 0.03);
+    var bars = gfx2d::Path {};
+    for i in 50 {
+        let x = i * 6.0;
+        gfx2d::move_to(bars, x, 0);
+        gfx2d::line_to(bars, x + 2, 0);
+        gfx2d::line_to(bars, x + 52, 100);
+        gfx2d::line_to(bars, x + 50, 100);
+        gfx2d::close(bars);
+    }
+    let bar_edges = 50 * (4 + 2 * sqrt(50.0 * 50 + 100 * 100));
+    check("stripes", fill_area(bars, gfx2d::NONZERO, 0), 50 * 200, 0.5);
+    check("stripes, fringe", fill_area(bars, gfx2d::NONZERO, 1) - 50 * 200, bar_edges * 0.125, bar_edges * 0.03);
 }

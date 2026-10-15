@@ -171,7 +171,10 @@ and how to check it. Strike items out as they land.
     and draw from that. *Check:* `pure_text` unchanged; `text_page` and
     `text_wrapped` times.
 
-15. **Two quadratic spots in the tessellator.** `fill_side` calls
+15. ~~**Two quadratic spots in the tessellator.**~~ Done, with
+    `many_contours` and `stripes` in the benchmark: record time 294 ms to
+    11 and 14 to about 4; `big_path` 26 to 19 and `self_crossing` 16.5
+    to 14 along the way, `path_fills` unchanged. `fill_side` calls
     `winding_at` over every contour for each contour: O(points × contours),
     which text as paths or a map pays. `band_spans` matches a span to the
     open trapezoids by linear search: O(spans²) a band for a wide path.
