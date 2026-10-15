@@ -148,6 +148,17 @@ fn main() {
     };
     print("shadow: under ", near(40, 40, 255, 0, 0, 255), ", beside ", near(65, 65, 128, 128, 128, 255),
           ", none up-left ", near(15, 15, 255, 255, 255, 255));
+    // A shape at the target's top edge, translucent, its shadow offset
+    // down: above the shadow there is nothing, not the layer's top row
+    // again; below, the shadow (a quarter dark, cast by a half-transparent
+    // shape) under the shape.
+    draw(gfx2d::WHITE) {
+        gfx2d::layer(gfx2d::LayerDesc { shadow: gfx2d::rgba(0x000000, 0.5), shadow_offset: float2 { 0, 10 } }) {
+            gfx2d::rect(20, 0, 40, 40, gfx2d::rgba(0xFF0000, 0.5));
+        };
+    };
+    print("shadow at the edge: none above its offset ", near(40, 5, 255, 128, 128, 255), ", below it ",
+          near(40, 20, 223, 96, 96, 255));
 
     // A layer in a clip is composited inside the clip only.
     check_area("layer in a clip", area() {

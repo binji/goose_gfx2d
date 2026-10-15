@@ -41,7 +41,7 @@ and how to check it. Strike items out as they land.
    its own image is replaced. *Check:* a headless case drawing an image in
    `BLEND_ADD` and at half opacity.
 
-4. **A composited layer clamps at its edge** (`composite.frag`): a drop
+4. ~~**A composited layer clamps at its edge**~~ Done (`composite.frag`): a drop
    shadow with an offset smears the layer's edge pixels across the gap,
    since the layer texture is sampled past its edge with a clamping
    sampler. *Change:* treat samples outside the layer as transparent.

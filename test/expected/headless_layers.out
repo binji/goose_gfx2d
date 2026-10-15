@@ -22,6 +22,7 @@ keep: true outside true
 add: true
 blur: total kept true, edge true, outside true, middle true
 shadow: under true, beside true, none up-left true
+shadow at the edge: none above its offset true, below it true
 layer in a clip: ok
 stats: 3 passes, 1 clip
 box_shadow: ok

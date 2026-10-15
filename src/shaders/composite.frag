@@ -68,7 +68,11 @@ vec3 blend_fn(uint mode, vec3 b, vec3 s) {
 
 void main() {
     vec2 size = vec2(textureSize(layer, 0));
-    vec4 s = textureLod(layer, (gl_FragCoord.xy - offset) / size, 0.0);
+    vec2 uv = (gl_FragCoord.xy - offset) / size;
+    vec4 s = textureLod(layer, uv, 0.0);
+    // Past the layer's edge there is nothing, not its edge pixels again
+    // (the sampler clamps): a shadow offset inward from the target's edge.
+    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) s = vec4(0.0);
     if (shadow != 0u) s = vec4(tint.rgb, 1.0) * tint.a * s.a;
     s *= opacity * clip_coverage(clip, gl_FragCoord.xy);
     if (blend < BLEND_SCREEN) {
