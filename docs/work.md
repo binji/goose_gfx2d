@@ -31,7 +31,9 @@ and how to check it. Strike items out as they land.
    release it after a few. *Check:* a headless test that draws a layer at
    two sizes and reads the pool's length after some frames.
 
-3. **`image()` takes a `tint: Color` only**, so an image cannot be drawn
+3. ~~**`image()` takes a `tint: Color` only**~~ Done (as `Paint` overloads
+   beside the `Color` ones, since a parameter with a default needs a type;
+   the paint's space stays local). So an image could not be drawn
    with a blend mode or a paint's opacity, though the comment above it says
    it takes those "like any shape".
    *Change:* make `tint` the generic `c` the shapes take: a `Color` tints,

@@ -9,6 +9,7 @@ image: true; around it 0,0,0,255 0,0,0,255
 scaled: true
 part: true; flipped: true
 tinted: 90,90,100,255 of 180,180,200,255
+paint: added 180,180,255,255, at half 90,90,227,255, gradient true blue 43
 repeat: true; decal: true 0,0,0,255; mirror: true
 gradient x image: true true
 nine-slice: 255,0,0,255 255,0,0,255 0,255,0,255 0,255,0,255 255,0,0,255 255,0,0,255 0,0,0,255

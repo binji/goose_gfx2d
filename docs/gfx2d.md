@@ -98,8 +98,11 @@ shape's distance function, and outlines are centered on the edge.
 | `image(tex, dst, src: Rect, tint, filter)` | a part of it, such as a sprite in a sheet; a negative `dst.w` or `dst.h` flips it |
 | `nine_slice(tex, dst, [src,] insets, tint, filter)` | corners at their size, edges stretched, the pieces meeting seamlessly |
 
-`filter` defaults to `FILTER_LINEAR`, or `FILTER_NEAREST` with
-anti-aliasing off.
+`tint` is a `Color`, which multiplies the image, or a `Paint`: its color
+or gradient multiplies the image, and its blend mode and opacity apply
+(`image(tex, x, y, with_blend(solid(WHITE), BLEND_ADD))`); the paint's own
+image is replaced, and its space is local. `filter` defaults to
+`FILTER_LINEAR`, or `FILTER_NEAREST` with anti-aliasing off.
 
 ### Paints (`paint.goose`)
 

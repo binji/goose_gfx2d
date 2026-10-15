@@ -970,9 +970,12 @@ fn box_shadow(x: f64, y: f64, w: f64, h: f64, r: f64, blur: f64, c, spread: f64 
 // --- images ----------------------------------------------------------------------------
 //
 // An image is a rectangle painted with a texture: so it takes the current
-// transform, antialiased edges, and a Paint's blend and opacity like any
-// shape. `tint` multiplies it; `filter` is FILTER_LINEAR or, for pixel
-// art, FILTER_NEAREST.
+// transform and antialiased edges like any shape. `tint` is a Color, which
+// multiplies the image, or a Paint: its color (or gradient) multiplies the
+// image, and its blend mode and opacity apply, with the paint's own image
+// replaced by this one and its space local (the image is placed where the
+// call says, under the current transform). `filter` is FILTER_LINEAR or,
+// for pixel art, FILTER_NEAREST.
 
 fn texture_rect(t: gfx::Texture) -> Rect {
     let info = gfx::texture_info(t);
@@ -984,8 +987,15 @@ fn image(t: gfx::Texture, x: f64, y: f64, tint: Color = WHITE, filter: i64 = FIL
     let whole = texture_rect(t);
     draw_image(t, rect_of(x, y, whole.w, whole.h), whole, false, tint, filter, 0);
 }
+fn image(t: gfx::Texture, x: f64, y: f64, tint: Paint, filter: i64 = FILTER_DEFAULT) {
+    let whole = texture_rect(t);
+    draw_image(t, rect_of(x, y, whole.w, whole.h), whole, false, tint, filter, 0);
+}
 // The whole texture, stretched over dst.
 fn image(t: gfx::Texture, dst: Rect, tint: Color = WHITE, filter: i64 = FILTER_DEFAULT) {
+    draw_image(t, dst, texture_rect(t), false, tint, filter, 0);
+}
+fn image(t: gfx::Texture, dst: Rect, tint: Paint, filter: i64 = FILTER_DEFAULT) {
     draw_image(t, dst, texture_rect(t), false, tint, filter, 0);
 }
 // The part `src` of the texture (pixels: a sprite in a sheet) over dst. A
@@ -994,13 +1004,24 @@ fn image(t: gfx::Texture, dst: Rect, src: Rect, tint: Color = WHITE,
          filter: i64 = FILTER_DEFAULT) {
     draw_image(t, dst, src, true, tint, filter, 0);
 }
+fn image(t: gfx::Texture, dst: Rect, src: Rect, tint: Paint, filter: i64 = FILTER_DEFAULT) {
+    draw_image(t, dst, src, true, tint, filter, 0);
+}
 
 // FILTER_LINEAR, or FILTER_NEAREST with antialiasing off: what images are
 // drawn with when a call does not say.
 let FILTER_DEFAULT = -1;
 
-fn draw_image(t: gfx::Texture, dst: Rect, src: Rect, part: bool, tint: Color, chosen: i64,
-              hard: u32) {
+// The paint an image is drawn with: the tint's, with the image in it.
+fn image_paint(img: Image, tint: Color) -> Paint { Paint { color: tint, image: img } }
+fn image_paint(img: Image, tint: Paint) -> Paint {
+    var p = tint;
+    p.image = img;
+    p.space = SPACE_LOCAL;
+    p
+}
+
+fn draw_image(t: gfx::Texture, dst: Rect, src: Rect, part: bool, tint, chosen: i64, hard: u32) {
     let filter = if chosen != FILTER_DEFAULT { chosen } else if state.aliased { FILTER_NEAREST }
                  else { FILTER_LINEAR };
     guard src.w != 0.0 && src.h != 0.0 else { return; }
@@ -1009,16 +1030,32 @@ fn draw_image(t: gfx::Texture, dst: Rect, src: Rect, part: bool, tint: Color, ch
                       src: if part { src } else { Rect { 0.0, 0.0, 0.0, 0.0 } },
                       wrap: WRAP_CLAMP, filter: filter as i32 };
     add(KIND_RECT, hard, box_at(dst.x, dst.y, dst.w, dst.h), box_geom(dst.w, dst.h, 0.0),
-        no_radii(), Paint { color: tint, image: img });
+        no_radii(), image_paint(img, tint));
 }
 
 // A nine-slice (nine-patch): `src`, a part of the texture, cut by `insets`
 // (pixels in from its left, top, right and bottom), drawn over dst with
 // the corners at their size, the edges stretched along their length and
 // the middle both ways. For panels and buttons whose borders must not
-// stretch.
+// stretch. `tint` is a Color or a Paint, as image's.
 fn nine_slice(t: gfx::Texture, dst: Rect, src: Rect, insets: float4, tint: Color = WHITE,
               filter: i64 = FILTER_DEFAULT) {
+    nine_slice_with(t, dst, src, insets, tint, filter);
+}
+fn nine_slice(t: gfx::Texture, dst: Rect, src: Rect, insets: float4, tint: Paint,
+              filter: i64 = FILTER_DEFAULT) {
+    nine_slice_with(t, dst, src, insets, tint, filter);
+}
+// The whole texture as the nine-slice.
+fn nine_slice(t: gfx::Texture, dst: Rect, insets: float4, tint: Color = WHITE,
+              filter: i64 = FILTER_DEFAULT) {
+    nine_slice_with(t, dst, texture_rect(t), insets, tint, filter);
+}
+fn nine_slice(t: gfx::Texture, dst: Rect, insets: float4, tint: Paint, filter: i64 = FILTER_DEFAULT) {
+    nine_slice_with(t, dst, texture_rect(t), insets, tint, filter);
+}
+
+fn nine_slice_with(t: gfx::Texture, dst: Rect, src: Rect, insets: float4, tint, filter: i64) {
     let sx: f32[4] = [src.x, src.x + insets.x, src.x + src.w - insets.z, src.x + src.w];
     let sy: f32[4] = [src.y, src.y + insets.y, src.y + src.h - insets.w, src.y + src.h];
     let dx: f32[4] = [dst.x, dst.x + insets.x, dst.x + dst.w - insets.z, dst.x + dst.w];
@@ -1038,11 +1075,6 @@ fn nine_slice(t: gfx::Texture, dst: Rect, src: Rect, insets: float4, tint: Color
             }
         }
     }
-}
-// The whole texture as the nine-slice.
-fn nine_slice(t: gfx::Texture, dst: Rect, insets: float4, tint: Color = WHITE,
-              filter: i64 = FILTER_DEFAULT) {
-    nine_slice(t, dst, texture_rect(t), insets, tint, filter);
 }
 
 // --- paths -------------------------------------------------------------------------------

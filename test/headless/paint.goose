@@ -130,6 +130,18 @@ fn main() {
           at(10, 0) == texel(3, 0) && at(13, 0) == texel(0, 0));
     draw(black) { gfx2d::image(tex, 0, 0, gfx2d::rgb(0x808080), gfx2d::FILTER_NEAREST); };
     print("tinted: ", at(3, 3), " of ", texel(3, 3));
+    // With a Paint: its blend mode and opacity, and its gradient multiplying
+    // the image, whose own image it replaces.
+    draw(gfx2d::BLUE) {
+        gfx2d::image(tex, 0, 0, gfx2d::with_blend(gfx2d::solid(white), gfx2d::BLEND_ADD), gfx2d::FILTER_NEAREST);
+        gfx2d::image(tex, gfx2d::rect_of(10, 0, 4, 4), gfx2d::with_opacity(gfx2d::solid(white), 0.5),
+                     gfx2d::FILTER_NEAREST);
+        var g = gfx2d::linear(0, 0, W, 0, white, black);
+        g.image = gfx2d::image_pattern(tex);        // replaced by the image drawn
+        gfx2d::image(tex, gfx2d::rect_of(0, 10, W, 4), gfx2d::rect_of(3, 3, 1, 1), g, gfx2d::FILTER_NEAREST);
+    };
+    print("paint: added ", at(3, 3), ", at half ", at(13, 3), ", gradient ",
+          red_near(100, 11, 180 * (1 - 100.5 / W)), " blue ", px[(11 * W + 100) * 4 + 2]);
     draw(black) {
         gfx2d::rect(0, 0, 16, 16, gfx2d::paint(gfx2d::image_pattern(tex, gfx2d::IDENTITY,
                                                gfx2d::WRAP_REPEAT, gfx2d::FILTER_NEAREST)));
