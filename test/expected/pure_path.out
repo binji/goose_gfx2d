@@ -33,3 +33,9 @@ zigzag in pieces: 7 groups; no overlap true, union true
 wave in pieces: 9 groups; no overlap true
 circle in pieces: true groups; no overlap true, the ring's area true
 transformed: gfx2d::Rect { 5.0, 5.0, 20.0, 20.0 }
+svg rect: true area 5000.0
+svg compact relative: true area 5000.0
+svg curves: true, 8 elements, pen at vec2<f32> { 20.0, 50.0 }, bounds gfx2d::Rect { 0.0, -17.0, 110.0, 134.0 }
+svg numbers: true Line { vec2<f32> { 10.0, -2.5 } }
+svg arc: false, junk: false, leading number: false
+warped: gfx2d::Rect { 0.0, 0.0, 20.0, 10.0 } area 100.0

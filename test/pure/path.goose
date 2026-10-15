@@ -264,4 +264,27 @@ fn main() {
     gfx2d::rect(moved, 0, 0, 10, 10);
     gfx2d::transform(moved, gfx2d::mul(gfx2d::translation(5, 5), gfx2d::scaling(2)));
     print("transformed: ", gfx2d::bounds(moved));
+
+    // SVG path data.
+    var svg = gfx2d::Path {};
+    print("svg rect: ", gfx2d::svg_path(svg, "M10,10 H110 V60 h-100 z"), " area ",
+          fill_area(svg, gfx2d::NONZERO, 0));
+    var rel = gfx2d::Path {};
+    print("svg compact relative: ", gfx2d::svg_path(rel, "m10 10l100 0 0 50-100 0z"), " area ",
+          fill_area(rel, gfx2d::NONZERO, 0));
+    var curves = gfx2d::Path {};
+    let curves_ok = gfx2d::svg_path(curves, "M0 50C0-17 100-17 100 50S0 117 0 50zM20 50Q50 0 80 50T20 50z");
+    print("svg curves: ", curves_ok, ", ", curves.els.len, " elements, pen at ",
+          gfx2d::current_point(curves), ", bounds ", gfx2d::bounds(curves));
+    var nums = gfx2d::Path {};
+    print("svg numbers: ", gfx2d::svg_path(nums, "M.5.5L1e1-2.5e0"), " ", nums.els[1]);
+    var arc = gfx2d::Path {};
+    var junk = gfx2d::Path {};
+    print("svg arc: ", gfx2d::svg_path(arc, "M0 0A10 10 0 0 1 20 0"), ", junk: ", gfx2d::svg_path(junk, "M0 0 L x"),
+          ", leading number: ", gfx2d::svg_path(junk, "10 10"));
+    // warp moves every point.
+    var w = gfx2d::Path {};
+    gfx2d::rect(w, 0, 0, 10, 10);
+    gfx2d::warp(w) { q => q + float2 { q.y, 0 } };
+    print("warped: ", gfx2d::bounds(w), " area ", fill_area(w, gfx2d::NONZERO, 0));
 }

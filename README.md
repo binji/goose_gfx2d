@@ -51,7 +51,8 @@ fn main() {
 ```
 
 `examples/` has a program for each part: `shapes`, `paint`, `paths`,
-`text`, `layers` and `pixel_art`.
+`text`, `layers` and `pixel_art`, and `goose_logo`, the Goose logo read
+from its SVG and animated.
 
 ## Layout
 

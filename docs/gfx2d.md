@@ -42,8 +42,9 @@ fn main() {
   happens and aborts at `end()`, as `gfx` does.
 
 The examples in `examples/` show each part: `shapes`, `paint`, `paths`,
-`text`, `layers` and `pixel_art`. Each takes `-- --frames N --screenshot
-file.png`.
+`text`, `layers`, `pixel_art` and `goose_logo` (the Goose logo from its
+SVG, animated by warping its path, with a rainbow shine). Each takes
+`-- --frames N --screenshot file.png`.
 
 ## Reference
 
@@ -122,7 +123,8 @@ struct Paint { color, gradient: Gradient, image: Image, image_mode, opacity, ble
 |---|---|
 | `struct Path`, `move_to`, `line_to`, `quad_to`, `cubic_to`, `close`, `clear`, `arc` | building |
 | `rect`, `rounded_rect`, `circle`, `ellipse`, `polygon`, `regular_polygon`, `star` (each on a `Path&`) | closed shapes as subpaths |
-| `transform(path, m)`, `bounds(path)`, `contains(path, p, rule)` | |
+| `svg_path(path, d) -> bool` | SVG path data: M, L, H, V, C, S, Q, T, Z, absolute and relative; not arcs (A) |
+| `transform(path, m)`, `warp(path) { q => … }`, `bounds(path)`, `contains(path, p, rule)` | an affine transform; any function of every point (for animating a shape) |
 | `fill(path, c, rule = NONZERO)` | `NONZERO` or `EVEN_ODD`: holes and self-intersections are handled |
 | `stroke(path, width, c)`, `stroke(path, Stroke { width, join, cap, miter_limit, dash, dash_offset, pixels }, c)` | joins `JOIN_MITER`, `ROUND`, `BEVEL`; up to 8 dash lengths; `pixels`: width in pixels under any transform |
 | `polygon(points, c)`, `triangle`, `quad`, `polyline(points, width, c, cap, join)`, `polygon_outline`, `regular_polygon(…, c)`, `star(…, c)` | shortcuts |
@@ -281,7 +283,7 @@ python bench/run_bench.py --goose …                       # bench/results.md
   driver.
 * **Paths:** a fringe only on the stretches of edges that are fill
   boundaries (faint lines show inside a translucent stroke's
-  self-crossings); retained meshes; SVG path data.
+  self-crossings); retained meshes; SVG elliptical arcs.
 * **Text:** bitmap glyphs for small and pixel-art text; glow; HarfBuzz
   shaping.
 * **Layers:** a color matrix filter; layers the size of their contents;

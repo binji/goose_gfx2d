@@ -185,6 +185,181 @@ fn transform(p: Path&, m: Affine) {
     }
 }
 
+// Every point of the path, control points included, moved by the block:
+// `warp(p) { q => q + offset_at(q) }`. For animating a path's shape.
+fn warp<F>(p: Path&) {
+    for &e in p.els {
+        match e {
+            Move v => { e = PathEl.Move { F(v.p) }; },
+            Line v => { e = PathEl.Line { F(v.p) }; },
+            Quad v => { e = PathEl.Quad { F(v.c), F(v.p) }; },
+            Cubic v => { e = PathEl.Cubic { F(v.c1), F(v.c2), F(v.p) }; },
+            Close => {},
+        }
+    }
+}
+
+// SVG path data (the `d` of a <path>) appended to p: M, L, H, V, C, S, Q,
+// T and Z, absolute and relative (lower case), with a command's
+// arguments repeated as SVG allows, and numbers as SVG writes them
+// ("-217-29", ".5.5", "1e-3"). Elliptical arcs (A) are not supported:
+// false, and the path as far as the data was read, for them or for data
+// that is not a path.
+fn svg_path(p: Path&, d: const u8[:]) -> bool {
+    var i = 0;
+    var cmd: u8 = 0;
+    var cur = float2_0;
+    var start = float2_0;
+    var ctrl = float2_0;            // the last curve's last control point, for S and T
+    var last: u8 = 0;               // the command before, upper case
+    fn skip() {
+        while i < d.len && (d[i] == ' ' || d[i] == ',' || d[i] == '\n' || d[i] == '\r' || d[i] == '\t') { i++; }
+    }
+    fn digits() -> f64, i64 {
+        var v = 0.0;
+        var n = 0;
+        while i < d.len && d[i] >= '0' && d[i] <= '9' {
+            v = v * 10 + (d[i] - '0');
+            i++;
+            n++;
+        }
+        return v, n;
+    }
+    // The next number, or false.
+    fn number() -> f64, bool {
+        skip();
+        var sign = 1.0;
+        if i < d.len && (d[i] == '-' || d[i] == '+') {
+            if d[i] == '-' { sign = -1.0; }
+            i++;
+        }
+        var v, n = digits();
+        if i < d.len && d[i] == '.' {
+            i++;
+            var scale = 0.1;
+            while i < d.len && d[i] >= '0' && d[i] <= '9' {
+                v += (d[i] - '0') * scale;
+                scale *= 0.1;
+                i++;
+                n++;
+            }
+        }
+        if n == 0 { return 0.0, false; }
+        if i < d.len && (d[i] == 'e' || d[i] == 'E') {
+            i++;
+            var esign = 1.0;
+            if i < d.len && (d[i] == '-' || d[i] == '+') {
+                if d[i] == '-' { esign = -1.0; }
+                i++;
+            }
+            let e, en = digits();
+            if en == 0 { return 0.0, false; }
+            v *= pow(10.0, esign * e);
+        }
+        return sign * v, true;
+    }
+    // Whether another number follows: the command repeats.
+    fn more() -> bool {
+        skip();
+        i < d.len && ((d[i] >= '0' && d[i] <= '9') || d[i] == '-' || d[i] == '+' || d[i] == '.')
+    }
+    fn point(relative: bool) -> float2, bool {
+        let x, okx = number();
+        let y, oky = number();
+        let q = float2 { x as f32, y as f32 };
+        return if relative { cur + q } else { q }, okx && oky;
+    }
+    loop {
+        skip();
+        if i >= d.len { break; }
+        let c = d[i];
+        if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') {
+            cmd = c;
+            i++;
+        } else if cmd == 0 || cmd == 'Z' || cmd == 'z' {
+            return false;           // a number with no command to take it
+        }
+        let rel = cmd >= 'a';
+        let up: u8 = if rel { cmd - 32 } else { cmd };
+        match up {
+            'Z' => {
+                p.close();
+                cur = start;
+                last = up;
+                continue;
+            },
+            'M' => {
+                let q, ok = point(rel);
+                if !ok { return false; }
+                p.move_to(q.x, q.y);
+                cur = q;
+                start = q;
+                // Pairs after a moveto are linetos.
+                cmd = if rel { 'l' } else { 'L' };
+            },
+            'L' => {
+                let q, ok = point(rel);
+                if !ok { return false; }
+                p.line_to(q.x, q.y);
+                cur = q;
+            },
+            'H' => {
+                let x, ok = number();
+                if !ok { return false; }
+                cur = float2 { (if rel { cur.x + x } else { x }) as f32, cur.y };
+                p.line_to(cur.x, cur.y);
+            },
+            'V' => {
+                let y, ok = number();
+                if !ok { return false; }
+                cur = float2 { cur.x, (if rel { cur.y + y } else { y }) as f32 };
+                p.line_to(cur.x, cur.y);
+            },
+            'C' => {
+                let c1, ok1 = point(rel);
+                let c2, ok2 = point(rel);
+                let q, ok3 = point(rel);
+                if !(ok1 && ok2 && ok3) { return false; }
+                p.cubic_to(c1.x, c1.y, c2.x, c2.y, q.x, q.y);
+                ctrl = c2;
+                cur = q;
+            },
+            'S' => {
+                // The first control point mirrors the last curve's second.
+                let c1 = if last == 'C' || last == 'S' { cur * float2 { 2, 2 } - ctrl } else { cur };
+                let c2, ok1 = point(rel);
+                let q, ok2 = point(rel);
+                if !(ok1 && ok2) { return false; }
+                p.cubic_to(c1.x, c1.y, c2.x, c2.y, q.x, q.y);
+                ctrl = c2;
+                cur = q;
+            },
+            'Q' => {
+                let c1, ok1 = point(rel);
+                let q, ok2 = point(rel);
+                if !(ok1 && ok2) { return false; }
+                p.quad_to(c1.x, c1.y, q.x, q.y);
+                ctrl = c1;
+                cur = q;
+            },
+            'T' => {
+                let c1 = if last == 'Q' || last == 'T' { cur * float2 { 2, 2 } - ctrl } else { cur };
+                let q, ok = point(rel);
+                if !ok { return false; }
+                p.quad_to(c1.x, c1.y, q.x, q.y);
+                ctrl = c1;
+                cur = q;
+            },
+            _ => { return false; },     // 'A', or not a command
+        }
+        last = up;
+        if !more() && i < d.len && !((d[i] >= 'A' && d[i] <= 'Z') || (d[i] >= 'a' && d[i] <= 'z')) {
+            return false;
+        }
+    }
+    true
+}
+
 // The bounds of the path's points, control points included.
 fn bounds(p: const Path&) -> Rect {
     var lo = float2 { 1e30, 1e30 };

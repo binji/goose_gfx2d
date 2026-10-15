@@ -408,8 +408,11 @@ Goose's namespaces design leaves for later).
   translucent one, faint lines show where a stroke crosses itself. The fix
   is to put the fringe only on the stretches of edges that are fill
   boundaries, which the band sweep already finds (the edges at span ends).
-* **Later:** retained meshes (`tessellate` once, draw every frame), user
-  triangle meshes with per-vertex colors and uvs, and SVG path data.
+* **SVG path data** (`svg_path`) and `warp` (every point of a path through
+  a function) came with the Goose logo example. Elliptical arcs aren't
+  parsed.
+* **Later:** retained meshes (`tessellate` once, draw every frame), and
+  user triangle meshes with per-vertex colors and uvs.
 
 Tessellation runs in Goose, into the frame's grow-shrink arrays, and is
 tested without a GPU in `test/pure/path.goose`. Those tests check areas by
