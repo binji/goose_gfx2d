@@ -298,6 +298,17 @@ struct FrameState {
 }
 var state = FrameState { transform: IDENTITY, .. };
 
+// The base scale: pixels per unit of the frame's coordinates, under every
+// transform block, so that a program on a high-density display draws in
+// logical units (gfx works in pixels). to_local and mouse_local divide it
+// back out. Kept between frames.
+var frame_scale = 1.0;
+fn set_scale(s: f64) {
+    if !(s > 0.0) { misuse("set_scale: the scale must be positive"); return; }
+    frame_scale = s;
+}
+fn current_scale() -> f64 { frame_scale }
+
 var passes: Pass[>..<] = [];
 var composites: Composite[>..<] = [];
 var clips: ClipGPU[>..<] = [];
@@ -370,7 +381,7 @@ fn begin_into(target: gfx::Texture, clear: bool, clear_color: Color, samples: i6
     begin_ramp_frame();
     let info = gfx::texture_info(target);
     state = FrameState { drawing: true, target: target, width: info.width, height: info.height,
-                         transform: IDENTITY, pass: 0, clip: 0, aliased: false };
+                         transform: scaling(frame_scale), pass: 0, clip: 0, aliased: false };
     for &t in pool { t.used = false; }
     passes.resize(0);
     composites.resize(0);
@@ -454,11 +465,20 @@ fn frame<F>(clear: Color, samples: i64 = 1) {
     F();
     end();
 }
+// The same at a base scale (set_scale), which stays set.
+fn frame<F>(clear: Color, samples: i64, scale: f64) {
+    set_scale(scale);
+    frame(clear, samples) { F(); };
+}
 // Into a target of the program's.
 fn draw_into<F>(target: gfx::Texture, clear: Color, samples: i64 = 1) {
     begin(target, clear, samples);
     F();
     end();
+}
+fn draw_into<F>(target: gfx::Texture, clear: Color, samples: i64, scale: f64) {
+    set_scale(scale);
+    draw_into(target, clear, samples) { F(); };
 }
 
 fn ensure_renderer() {

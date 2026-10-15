@@ -7,3 +7,4 @@ canvas: corner 255,0,0,255 255,0,0,255 next 0,0,255,255; far corner 0,255,0,255 
 each canvas pixel a 3x3 block: true
 camera: 255,255,255,255 0,0,0,255 255,255,255,255 0,0,0,255
 mouse_local: vec2<f32> { 20.0, 20.0 }
+scale 2: 0,0,0,255 255,255,255,255 255,255,255,255 0,0,0,255; to_local vec2<f32> { 15.0, 20.0 }; the transform 2.0x; kept 2.0

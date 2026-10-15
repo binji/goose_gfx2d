@@ -109,5 +109,19 @@ fn main() {
         gfx2d::translate(10, 20) { gfx2d::scale(2) { local = gfx2d::mouse_local(); }; };
     };
     print("mouse_local: ", local);
+
+    // A base scale: the frame's units drawn that many pixels each, under
+    // the transform blocks, and to_local dividing it out.
+    var inside = float2 { 0, 0 };
+    var scaled = 0.0;
+    gfx2d::draw_into(target, gfx2d::BLACK, 1, 2) {
+        gfx2d::rect(10, 10, 20, 20, gfx2d::WHITE);
+        gfx2d::translate(5, 0) { inside = gfx2d::to_local(float2 { 40, 40 }); };
+        scaled = gfx2d::current_transform().a;
+    };
+    px = gfx::read_pixels(target);
+    print("scale 2: ", at(19, 19), " ", at(20, 20), " ", at(59, 59), " ", at(60, 60), "; to_local ", inside,
+          "; the transform ", scaled, "x; kept ", gfx2d::current_scale());
+    gfx2d::set_scale(1);
     gfx::close();
 }

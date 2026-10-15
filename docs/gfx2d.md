@@ -72,6 +72,7 @@ one, and 2D can go before or after 3D and `ui`.
 | `translate`, `rotate`, `rotate_about`, `scale`, `skew`, `transform(m)` | change the current transform; with a block, only for the block |
 | `push()`, `pop()`, `current_transform()`, `set_transform(m)`, `reset_transform()` | the transform stack |
 | `to_local(p)`, `to_pixels(p)`, `mouse_local()` | between pixels and the current transform's space |
+| `set_scale(s)`, `current_scale()`, `frame(clear, samples, s)`, `draw_into(target, clear, samples, s)` | the base scale every frame starts from: pixels per unit, for high-density displays |
 | `struct Rect { x, y, w, h }`, `rect_of`, `center`, `contains`, `inflate`, `intersect`, `union`, `transformed_bounds`, `fit(src, dst, FIT_*)` | rectangles |
 | `in_rect`, `in_rounded_rect`, `in_circle`, `in_ellipse`; `contains(path, p, rule)` | hit testing, in the shape's own space |
 | `struct Camera2D { center, zoom, rotation }`, `camera(cam) { … }`, `camera_transform`, `world_to_screen`, `screen_to_world` | a 2D camera |

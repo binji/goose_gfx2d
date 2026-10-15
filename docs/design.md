@@ -170,9 +170,12 @@ gfx2d::clip_rounded_rect(0, 0, 300, 200, 24) {
   radii), stay `f32`. `rect_of(x, y, w, h)` builds a `Rect` from any
   numbers.
 * **High-density displays.** `gfx` works in pixels and reports the mouse in
-  pixels. A base scale (`gfx2d::set_scale(s)`, or `frame(clear, scale)`), so
-  that a program can draw in logical units with hit testing dividing the
-  scale back out, is not built yet ([work.md](work.md), item 18).
+  pixels. A base scale (`set_scale(s)`, or `frame(clear, samples, scale)`
+  and `draw_into(target, clear, samples, scale)`, which set it) is the
+  transform every frame starts from, so a program draws in logical units,
+  and `to_local` and `mouse_local` divide it back out. `current_scale()`
+  reads it. Text snaps its baselines to whole pixels under it as under
+  the identity.
 * **Canvases.** `begin(target: gfx::Texture, clear: Color)` draws into any
   color target, and `begin(target)` draws over what is already there.
   `gfx2d` opens and closes its own `gfx` passes, the same way `ui::render`

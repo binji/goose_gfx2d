@@ -648,10 +648,10 @@ fn text(x: f64, y: f64, s: const u8[:], style: TextStyle, c) {
         BASELINE_BOTTOM => y - height + ascent,
         _ => y + ascent,
     };
-    // On whole pixels where nothing turns or scales the text, so its
-    // horizontal strokes stay sharp.
+    // On whole pixels where nothing turns the text or scales it unevenly
+    // (the base scale is allowed), so its horizontal strokes stay sharp.
     let m = current_transform();
-    let plain = m.b == 0.0 && m.c == 0.0 && m.a == 1.0 && m.d == 1.0;
+    let plain = m.b == 0.0 && m.c == 0.0 && m.a == m.d && m.a > 0.0;
     let k = (style.size / BASE_SIZE) as f32;
     let stroke = style.outline > 0.0;
     for l in laid_lines {
@@ -660,7 +660,7 @@ fn text(x: f64, y: f64, s: const u8[:], style: TextStyle, c) {
             left = if style.align == ALIGN_CENTER { x - l.width * 0.5 } else { x - l.width };
         }
         var line_y = baseline;
-        if plain { line_y = round(line_y + m.ty) - m.ty; }
+        if plain { line_y = (round(line_y * m.a + m.ty) - m.ty) / m.a; }
         for p in placed_glyphs[l.first..l.end] {
             let slot = glyph_slot(p.font, p.glyph);
             if slot.w > 0 {

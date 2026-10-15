@@ -225,7 +225,7 @@ Single runs here swung by 2x between them, so compare cases within one run.
     (they do not go to the GPU), narrowed where they are used. *Check:* the
     examples build without casts; the tests.
 
-18. **No high-density support.** The design promised a base scale
+18. ~~**No high-density support.**~~ Done. The design promised a base scale
     (`frame(clear, scale)`) so a program can draw in logical units on a
     display where `gfx`'s pixels are smaller; nothing shipped. *Change:*
     `set_scale(s)` applied under the identity at `begin()`, `to_local` and
