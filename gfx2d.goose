@@ -157,23 +157,49 @@ struct Renderer {
 var renderer: Renderer;
 
 // Textures a frame draws layers, masks and blurs in, kept from frame to
-// frame and handed out again: free until a frame takes one.
-struct Pooled { texture: gfx::Texture, w: i64, h: i64, format: i32, samples: i32, used: bool }
+// frame and handed out again: free until a frame takes one. One left
+// unused goes after POOL_IDLE frames (a layer drawn now and then keeps its
+// texture), or after POOL_IDLE_OTHER if it is not the target's size: a
+// window resized leaves them behind by the dozen, while a program drawing
+// into a texture and the screen by turns, each with layers, keeps both.
+struct Pooled { texture: gfx::Texture, w: i64, h: i64, format: i32, samples: i32, used: bool,
+                idle: i64 = 0 }
 var pool: Pooled[>..<] = [];
+let POOL_IDLE = 8;
+let POOL_IDLE_OTHER = 2;
 
 // A texture of the pool, free this frame, made if there is none.
 fn pooled(w: i64, h: i64, format: i32, samples: i32) -> gfx::Texture {
     for &t in pool {
         if !t.used && t.w == w && t.h == h && t.format == format && t.samples == samples {
             t.used = true;
+            t.idle = 0;
             return t.texture;
         }
     }
     let usage = if samples > 1 { gfx::COLOR_TARGET } else { gfx::COLOR_TARGET | gfx::SAMPLED };
     let t = gfx::texture(gfx::TextureDesc { format: format, usage: usage, width: w as i32,
                                             height: h as i32, samples: samples });
-    pool.push(Pooled { t, w, h, format, samples, true });
+    pool.push(Pooled { t, w, h, format, samples, true, 0 });
     t
+}
+
+// At a frame's end: the pool's textures the frame left unused are counted
+// idle, and the ones that have outstayed their welcome released.
+fn sweep_pool() {
+    var keep = 0;
+    for t in pool {
+        var p = t;
+        if !p.used { p.idle++; }
+        let limit = if p.w == state.width && p.h == state.height { POOL_IDLE } else { POOL_IDLE_OTHER };
+        if p.idle >= limit {
+            gfx::release(p.texture);
+        } else {
+            pool[keep] = p;
+            keep++;
+        }
+    }
+    pool.resize(keep);
 }
 
 // What one draw call draws: a run of shape instances, or of mesh indices,
@@ -325,6 +351,7 @@ fn end() {
     state.drawing = false;
     close_pass();
     flush_batches();
+    sweep_pool();
 }
 
 // --- passes ---------------------------------------------------------------------------

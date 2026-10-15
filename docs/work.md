@@ -23,7 +23,7 @@ and how to check it. Strike items out as they land.
    in one frame, and sees the earlier glyphs' slots unchanged, then the
    reset at the next frame.
 
-2. **The texture pool never shrinks.** `pooled` (`gfx2d.goose`) matches on
+2. ~~**The texture pool never shrinks.**~~ Done. `pooled` (`gfx2d.goose`) matches on
    exact size, so every window resize leaves the old target-sized layer,
    mask and multisample textures allocated for good. A resize drag with one
    layer in the frame accumulates hundreds of megabytes.

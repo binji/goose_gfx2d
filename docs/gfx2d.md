@@ -212,7 +212,9 @@ Goose program ──► gfx2d (Goose: shapes, paints, paths, text layout, passes
     indices, paints (96 bytes) and clips (64 bytes) are each uploaded once.
   * A batch is one draw call. Shape batches split on blend mode, image and
     mask; mesh batches also on their clip.
-  * Layer, mask and canvas textures come from a pool kept between frames.
+  * Layer, mask and canvas textures come from a pool kept between frames;
+    one unused for eight frames (two, if it is not the target's size) is
+    released.
 * **Paths:** curves are flattened after the transform, then tessellated:
   * a convex contour becomes a fan with an exact one-pixel fringe;
   * anything else is cut into bands at vertices and crossings, with spans

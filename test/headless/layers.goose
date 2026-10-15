@@ -173,5 +173,26 @@ fn main() {
         sum
     };
     check_area("multisampled star", msaa_area, star_area, 15);
+
+    // The pool: a layer's textures of another size than the target's go
+    // after POOL_IDLE_OTHER frames unused, the target's after POOL_IDLE.
+    let small = gfx::render_target(64, 64, gfx::RGBA8);
+    gfx2d::draw_into(small, gfx2d::BLACK) { gfx2d::layer(0.5) { everything(); }; };
+    fn small_ones() -> i64 {
+        var n = 0;
+        for t in gfx2d::pool { if t.w == 64 { n++; } }
+        n
+    }
+    let had = small_ones();
+    gfx2d::draw_into(target, gfx2d::BLACK) { gfx2d::layer(0.5) { everything(); }; };
+    let after_one = small_ones();
+    gfx2d::draw_into(target, gfx2d::BLACK) { };
+    let after_two = small_ones();
+    let kept = gfx2d::pool.len;
+    for i in gfx2d::POOL_IDLE - 2 { gfx2d::draw_into(target, gfx2d::BLACK) { }; }
+    let still = gfx2d::pool.len;
+    gfx2d::draw_into(target, gfx2d::BLACK) { };
+    print("pool: ", had, " of another size, ", after_one, " a frame later, ", after_two, " after two; the target's kept ",
+          kept > 0 && still > 0, ", ", gfx2d::pool.len, " after ", gfx2d::POOL_IDLE, " frames unused");
     gfx::close();
 }

@@ -870,7 +870,9 @@ and ends with it.
     a path clip 2. A draw pass with nothing to draw that clears nothing
     is skipped.
   * Pooled textures come back every frame and are made again only when
-    the target's size changes or gfx is reopened.
+    the target's size changes or gfx is reopened. One left unused for
+    eight frames is released, or for two if it is not the target's size,
+    so a window resized does not keep every size it passed through.
 * **Later:** a color-matrix filter, glow, scissor for axis-aligned
   rectangle clips (cheaper than the shader, but without antialiasing at
   fractional edges), and layers the size of their contents rather than of

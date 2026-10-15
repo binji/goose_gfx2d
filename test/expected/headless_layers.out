@@ -27,3 +27,4 @@ stats: 3 passes, 1 clip
 box_shadow: ok
 box_shadow, rounded: ok
 multisampled star: ok
+pool: 1 of another size, 1 a frame later, 0 after two; the target's kept true, 0 after 8 frames unused
