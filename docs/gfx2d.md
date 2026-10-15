@@ -219,7 +219,9 @@ Goose program ──► gfx2d (Goose: shapes, paints, paths, text layout, passes
     rows) draws further gradients as their middle color that frame and
     starts over at the next.
   * A batch is one draw call. Shape batches split on blend mode, image and
-    mask; mesh batches also on their clip.
+    mask; mesh batches also on their clip. Within a pass a batch binds only
+    what differs from the batch before it (pipeline, textures, buffers,
+    uniform blocks).
   * Layer, mask and canvas textures come from a pool kept between frames;
     one unused for eight frames (two, if it is not the target's size) is
     released.

@@ -634,7 +634,14 @@ and ends with it.
 * **Passes.** A frame is a list of passes, and everything is still
   uploaded once.
   * A draw pass draws a run of batches into a target, multisampled and
-    resolved or not.
+    resolved or not. `flush_batches` keeps what the pass has bound and
+    binds, for each batch, only what changes: gfx hands every call on, a
+    pipeline bound again makes SDL rebuild its descriptor sets at the next
+    draw, and a uniform block pushed again is copied again. What a draw
+    call then costs is the driver's descriptor update when its texture
+    differs from the last one's (a third of the `sprites_alternating`
+    benchmark's process time, in the Intel Vulkan driver), which only
+    fewer texture changes, an atlas, can cut.
   * A blur pass draws a texture blurred one way, or copied, into another.
   * A layer adds 2 passes, a backdrop blend mode 2 more, each blur 2 (and
     one downsample at a lower resolution, shared by a blur and a shadow at

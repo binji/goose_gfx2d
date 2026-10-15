@@ -37,7 +37,9 @@ the bytes `end()` uploaded (instances, mesh vertices and indices, paints).
 `end` grows with bytes uploaded faster than in proportion on some drivers:
 goose_gfx's `update_buffer` creates a transfer buffer per call, and on
 Intel's Linux Vulkan driver allocating tens of megabytes a frame is most of
-`end`'s time.
+`end`'s time. A draw call whose texture differs from the last one's costs
+the driver a descriptor set update, about 2 µs here, which is most of
+`sprites_alternating`'s `end`.
 
 ## The cases
 

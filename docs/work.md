@@ -81,7 +81,10 @@ and how to check it. Strike items out as they land.
    costs about three times a solid one (`shared_gradients` 5 µs a shape
    against `circles`' 1.8, JIT). Passing `Paint` and `Gradient` by
    reference gained nothing, twice, so copies are not it: profile the AOT
-   build before guessing again.
+   build before guessing again. (Item 13's profile of `sprites_alternating`:
+   `paint_key`'s own instructions, with what is inlined into it, are 4.7%
+   of the process, against 6% for the benchmark's loop around 2,000
+   `image()` calls; annotate that function next.)
 
 8. ~~**Every stroke is outlined and filled by the nonzero sweep.**~~ Done
    (`stroke_triangles`; `pixels` strokes take the same path). That is
@@ -138,7 +141,15 @@ and how to check it. Strike items out as they land.
     sigma scaled. *Check:* the `blur` case of `headless_layers` keeps its
     total within tolerance; the `blur` benchmark.
 
-13. **Every batch rebinds everything.** `flush_batches` binds the pipeline,
+13. ~~**Every batch rebinds everything.**~~ Done, for less than hoped:
+    `sprites_alternating`'s `end` 5.2 ms to 3.9 at best (the minimum of
+    eight interleaved runs; medians 6.2 to 5.7). A perf profile of the
+    AOT build shows why: a third of the process is SDL's descriptor set
+    binding in the Intel Vulkan driver, once per draw whose texture
+    changed, and gfx2d's own loop under 1%. SDL already skips a texture
+    bound again; what the dedup saves is the pipeline rebind (which
+    dirtied every descriptor set) and the uniform copies. Fewer texture
+    changes are the only cure for the rest. `flush_batches` binds the pipeline,
     all textures, both storage buffers and both uniform blocks for each
     batch; `sprites_alternating` pays 8 µs a draw call in `end()`.
     *Change:* remember what is bound in the pass and bind only what
@@ -166,6 +177,9 @@ and how to check it. Strike items out as they land.
 
 16. **`image()` asks `gfx` for the texture's size on every call.**
     `texture_rect` calls `texture_info` per image; `sprites` draws 10,000.
+    (The AOT profile under item 13 puts `gs_gfx_texture_info` at 0.04% of
+    `sprites_alternating`, and `paint_key`'s own code at 4.7%, the
+    item 7 leftover: measure before and after.)
     *Change:* a small cache by texture id, cleared when `gfx` reopens; or an
     `image` overload that takes the size. *Check:* `sprites`' record time.
 

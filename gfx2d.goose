@@ -544,6 +544,67 @@ fn begin_ramp_frame() {
     ramps_baked = 0;
 }
 
+// What the pass being recorded has bound so far, so that a batch binds
+// only what it changes. gfx hands every bind on: a pipeline bound again
+// has SDL rebuild every descriptor set at the next draw, and a uniform
+// block pushed again is copied again, the same or not. A fragment uniform
+// block of another shape than a batch's (a composite's) is noted so the
+// next batch pushes its own.
+struct Bound {
+    pipeline: u32 = 0,
+    textures: u32[4] = [0; 4],      // the fragment stage's, by slot, with their samplers
+    samplers: u32[4] = [0; 4],
+    storage: u32[3] = [0; 3],       // VERTEX 0, FRAGMENT 0, FRAGMENT 1
+    geometry: u32 = 0,              // the mesh vertex buffer, with the index buffer
+    frame: FrameUniforms = FrameUniforms { .. },
+    has_frame: bool = false,
+    blend: BlendUniforms = BlendUniforms { .. },
+    has_blend: bool = false,
+}
+var bound = Bound { .. };
+
+fn bind_pipeline(p: gfx::Pipeline) {
+    if bound.pipeline != p.id {
+        gfx::bind(p);
+        bound.pipeline = p.id;
+    }
+}
+fn bind_fragment_texture(slot: i64, t: gfx::Texture, s: gfx::Sampler) {
+    if bound.textures[slot] != t.id || bound.samplers[slot] != s.id {
+        gfx::bind_texture(gfx::FRAGMENT, slot, t, s);
+        bound.textures[slot] = t.id;
+        bound.samplers[slot] = s.id;
+    }
+}
+fn bind_storage(stage: i64, slot: i64, b: gfx::Buffer) {
+    let i = if stage == gfx::VERTEX { 0 } else { 1 + slot };
+    if bound.storage[i] != b.id {
+        gfx::bind_storage_buffer(stage, slot, b);
+        bound.storage[i] = b.id;
+    }
+}
+fn bind_geometry() {
+    if bound.geometry != renderer.vertices.id {
+        gfx::bind_vertex_buffer(renderer.vertices);
+        gfx::bind_index_buffer(renderer.indices, 4);
+        bound.geometry = renderer.vertices.id;
+    }
+}
+fn push_frame(u: FrameUniforms) {
+    if !bound.has_frame || bound.frame.base != u.base || bound.frame.view != u.view {
+        gfx::uniforms(gfx::VERTEX, 0, u);
+        bound.frame = u;
+        bound.has_frame = true;
+    }
+}
+fn push_blend(u: BlendUniforms) {
+    if !bound.has_blend || bound.blend.blend != u.blend || bound.blend.clip != u.clip {
+        gfx::uniforms(gfx::FRAGMENT, 0, u);
+        bound.blend = u;
+        bound.has_blend = true;
+    }
+}
+
 fn flush_batches() {
     last_stats = Stats { instances: instances.len, triangles: mesh_indices.len / 3,
                          draws: batches.len, paints: paints.len - 1, ramps: ramps_baked,
@@ -574,6 +635,7 @@ fn flush_batches() {
         desc.color[0] = p.target;
         desc.resolve[0] = p.resolve;
         guard gfx::begin_pass(desc) else { return; }
+        bound = Bound { .. };
         if p.kind == PASS_BLUR {
             gfx::bind(renderer.blur);
             gfx::bind_texture(gfx::FRAGMENT, 0, p.src, linear);
@@ -588,13 +650,13 @@ fn flush_batches() {
             if b.kind == BATCH_COMPOSITE {
                 let c = composites[b.first];
                 if c.scissor.w < 0 { continue; }      // a clear done by the pass instead
-                gfx::bind(renderer.composite[b.blend]);
-                gfx::bind_texture(gfx::FRAGMENT, 0, c.layer, linear);
-                gfx::bind_texture(gfx::FRAGMENT, 1, if c.backdrop.id != 0 { c.backdrop } else { renderer.white },
-                                  linear);
-                gfx::bind_texture(gfx::FRAGMENT, 2, mask, linear);
-                gfx::bind_storage_buffer(gfx::FRAGMENT, 0, renderer.clips);
+                bind_pipeline(renderer.composite[b.blend]);
+                bind_fragment_texture(0, c.layer, linear);
+                bind_fragment_texture(1, if c.backdrop.id != 0 { c.backdrop } else { renderer.white }, linear);
+                bind_fragment_texture(2, mask, linear);
+                bind_storage(gfx::FRAGMENT, 0, renderer.clips);
                 gfx::uniforms(gfx::FRAGMENT, 0, c.u);
+                bound.has_blend = false;
                 if c.scissor.w > 0 {
                     gfx::scissor(c.scissor.x, c.scissor.y, c.scissor.w, c.scissor.h);
                     gfx::draw(3);
@@ -607,23 +669,24 @@ fn flush_batches() {
                 continue;
             }
             let image = if b.texture.id == 0 { renderer.white } else { b.texture };
-            gfx::bind_texture(gfx::FRAGMENT, 0, ramps, linear);
-            gfx::bind_texture(gfx::FRAGMENT, 1, image, renderer.samplers[b.sampler]);
+            bind_fragment_texture(0, ramps, linear);
+            bind_fragment_texture(1, image, renderer.samplers[b.sampler]);
             if b.kind == BATCH_SHAPES {
-                gfx::bind(renderer.pipelines[b.blend]);
-                gfx::bind_storage_buffer(gfx::VERTEX, 0, renderer.instances);
-                gfx::bind_texture(gfx::FRAGMENT, 2, glyphs, linear);
-                gfx::bind_texture(gfx::FRAGMENT, 3, mask, linear);
+                bind_pipeline(renderer.pipelines[b.blend]);
+                bind_storage(gfx::VERTEX, 0, renderer.instances);
+                bind_fragment_texture(2, glyphs, linear);
+                bind_fragment_texture(3, mask, linear);
             } else {
-                gfx::bind(renderer.mesh_pipelines[b.blend]);
-                gfx::bind_vertex_buffer(renderer.vertices);
-                gfx::bind_index_buffer(renderer.indices, 4);
-                gfx::bind_texture(gfx::FRAGMENT, 2, mask, linear);
+                bind_pipeline(renderer.mesh_pipelines[b.blend]);
+                bind_geometry();
+                bind_fragment_texture(2, mask, linear);
             }
-            gfx::bind_storage_buffer(gfx::FRAGMENT, 0, renderer.paints);
-            gfx::bind_storage_buffer(gfx::FRAGMENT, 1, renderer.clips);
-            gfx::uniforms(gfx::VERTEX, 0, FrameUniforms { view: view, base: b.first as u32 });
-            gfx::uniforms(gfx::FRAGMENT, 0, BlendUniforms { blend: b.blend as u32, clip: b.clip });
+            bind_storage(gfx::FRAGMENT, 0, renderer.paints);
+            bind_storage(gfx::FRAGMENT, 1, renderer.clips);
+            // A mesh batch's shader has no use for the base: 0, so that
+            // mesh batches in a row share one push.
+            push_frame(FrameUniforms { view: view, base: if b.kind == BATCH_SHAPES { b.first as u32 } else { 0 } });
+            push_blend(BlendUniforms { blend: b.blend as u32, clip: b.clip });
             if b.kind == BATCH_SHAPES { gfx::draw(b.count * 6); }
             else { gfx::draw_indexed(b.count, 1, b.first, 0, 0); }
         }
