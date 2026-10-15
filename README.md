@@ -1,5 +1,7 @@
 # goose_gfx2d
 
+![The Goose logo drawn by gfx2d, a gloss sweeping across it](docs/images/goose_logo.png)
+
 2D drawing for the [Goose](https://github.com/aardappel/goose) programming
 language, on [goose_gfx](https://github.com/aardappel/goose_gfx). It provides
 anti-aliased shapes (rectangles, rounded rectangles, circles, ellipses, arcs,
@@ -52,7 +54,7 @@ fn main() {
 
 `examples/` has a program for each part: `shapes`, `paint`, `paths`,
 `text`, `layers` and `pixel_art`, and `goose_logo`, the Goose logo read
-from its SVG and animated.
+from its SVG and animated (the picture above is one of its frames).
 
 ## Layout
 

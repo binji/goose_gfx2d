@@ -1,6 +1,6 @@
 // The Goose logo, from its SVG: the paths' data parsed by svg_path, the
 // goose's speed lines rippling and its head bobbing by warping the path a
-// little every frame, its name centered below it, and now and then a gloss
+// little every frame, the library's name centered below it, and now and then a gloss
 // like iridescent metal sweeping across both, with a glow.
 //
 // goose_logo.svg is the Goose repository's vscode/fileicons/goose-light-icon.svg
@@ -135,18 +135,18 @@ fn main() {
             gfx2d::layer(gfx2d::LayerDesc { shadow: gfx2d::rgba(0x000000, 0.6),
                                             shadow_offset: float2 { 0, 10 }, shadow_blur: 12 }) {
                 gfx2d::transform(fit) { gfx2d::fill(moving, cream); };
-                gfx2d::text(size.x / 2, name_y, "Goose", name_style, cream);
+                gfx2d::text(size.x / 2, name_y, "goose_gfx2d", name_style, cream);
             };
             if shining {
                 // The gloss on both, and a glow of it, blurred and added,
                 // spilling past their edges.
                 let band = gfx2d::with_opacity(shine, strength);
                 gfx2d::transform(fit) { gfx2d::fill(moving, band); };
-                gfx2d::text(size.x / 2, name_y, "Goose", name_style, band);
+                gfx2d::text(size.x / 2, name_y, "goose_gfx2d", name_style, band);
                 gfx2d::layer(gfx2d::LayerDesc { opacity: (0.6 * strength) as f32,
                                                 blend: gfx2d::BLEND_ADD, blur: 8 }) {
                     gfx2d::transform(fit) { gfx2d::fill(moving, shine); };
-                    gfx2d::text(size.x / 2, name_y, "Goose", name_style, shine);
+                    gfx2d::text(size.x / 2, name_y, "goose_gfx2d", name_style, shine);
                 };
             }
         };
