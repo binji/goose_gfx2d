@@ -208,7 +208,7 @@ fn main() {
     // quarter: the result is the full-resolution one's within a few
     // levels, and its total is kept.
     fn blurred_rect(sigma: f64) -> u8[>..] {
-        draw(gfx2d::BLACK) { gfx2d::layer(gfx2d::LayerDesc { blur: sigma as f32 }) { gfx2d::rect(40, 40, 30, 30, white); }; };
+        draw(gfx2d::BLACK) { gfx2d::layer(gfx2d::LayerDesc { blur: sigma }) { gfx2d::rect(40, 40, 30, 30, white); }; };
         copy(px)
     }
     var worst = 0;

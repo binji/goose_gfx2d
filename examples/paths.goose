@@ -83,7 +83,7 @@ fn main() {
                     gfx2d::circle(ring, 0, 0, 45);
                     gfx2d::fill(ring, accents[2], gfx2d::EVEN_ODD);
                     gfx2d::stroke(ring, gfx2d::Stroke { width: 3, cap: gfx2d::CAP_ROUND,
-                                                        dash: [12, 8], dash_offset: (t * 40) as f32 }, ink);
+                                                        dash: [12, 8], dash_offset: t * 40 }, ink);
                 };
             };
 

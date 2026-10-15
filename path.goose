@@ -52,12 +52,12 @@ let JOIN_BEVEL = 2;
 let MAX_DASHES = 8;
 
 struct Stroke {
-    width: f32 = 1.0,
+    width: f64 = 1.0,
     join: i32 = 0,                  // JOIN_MITER
     cap: i32 = 0,                   // CAP_BUTT
-    miter_limit: f32 = 4.0,         // a miter longer than this many half widths is beveled
-    dash: f32[..8] = [],            // on, off, on, off, ... lengths; empty: solid
-    dash_offset: f32 = 0.0,         // how far into the pattern the path starts
+    miter_limit: f64 = 4.0,         // a miter longer than this many half widths is beveled
+    dash: f64[..8] = [],            // on, off, on, off, ... lengths; empty: solid
+    dash_offset: f64 = 0.0,         // how far into the pattern the path starts
     pixels: bool = false,           // width and dashes in pixels, whatever the transform
 }
 
@@ -1416,12 +1416,12 @@ fn stroke_contours(pts: const float2[:], contours: const Contour[:], s: Stroke, 
                    out: TessVertex[>..<]&, idx: u32[>..<]&) {
     fn emit(p: const float2[:], cs: const Contour[:]) {
         if !once {
-            stroke_triangles(p, cs, half, s.join, s.cap, s.miter_limit, tolerance, fringe, out, idx);
+            stroke_triangles(p, cs, half, s.join, s.cap, s.miter_limit as f32, tolerance, fringe, out, idx);
             return;
         }
         outline_pts.resize(0);
         outline_cs.resize(0);
-        stroke_outline(p, cs, half, s.join, s.cap, s.miter_limit, tolerance, outline_pts, outline_cs);
+        stroke_outline(p, cs, half, s.join, s.cap, s.miter_limit as f32, tolerance, outline_pts, outline_cs);
         // Each piece of the outline tessellated alone (stroke_outline's
         // STROKE_CHUNK).
         var a = 0;
@@ -1437,10 +1437,10 @@ fn stroke_contours(pts: const float2[:], contours: const Contour[:], s: Stroke, 
         return;
     }
     var pattern: f32[..8] = [];
-    for d in s.dash { pattern.push(d * dash_scale); }
+    for d in s.dash { pattern.push((d * dash_scale) as f32); }
     dash_pts.resize(0);
     dash_cs.resize(0);
-    dash_contours(pts, contours, pattern, s.dash_offset * dash_scale, dash_pts, dash_cs);
+    dash_contours(pts, contours, pattern, (s.dash_offset * dash_scale) as f32, dash_pts, dash_cs);
     emit(dash_pts, dash_cs);
 }
 
@@ -1463,7 +1463,7 @@ fn stroke_mesh(p: const Path&, s: Stroke, scale: f32, fringe_px: f32, once: bool
                out: TessVertex[>..<]&, idx: u32[>..<]&) -> f32 {
     let sc = max(scale, 0.000001);
     let px = 1.0 / sc;
-    let width_px = abs(s.width) * (if s.pixels { 1.0 } else { sc });
+    let width_px = (abs(s.width) as f32) * (if s.pixels { 1.0 } else { sc });
     let k = min(width_px, 1.0);
     let half = max(width_px, 1.0) * 0.5 * px;
     flat_pts.resize(0);

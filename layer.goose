@@ -117,12 +117,12 @@ let BLEND_ERASE = 14;       // what is under the layer, cleared where the layer 
 let BLEND_KEEP = 15;        // what is under the layer, kept only where the layer is (destination-in)
 
 struct LayerDesc {
-    opacity: f32 = 1.0,
+    opacity: f64 = 1.0,
     blend: i32 = 0,                             // BLEND_NORMAL
-    blur: f32 = 0.0,                            // the layer blurred: a gaussian's sigma, pixels
+    blur: f64 = 0.0,                            // the layer blurred: a gaussian's sigma, pixels
     shadow: Color = Color { 0.0, 0.0, 0.0, 0.0 },   // a drop shadow's color; transparent: none
     shadow_offset: float2 = float2 { 0.0, 0.0 },
-    shadow_blur: f32 = 0.0,                     // the shadow's sigma, pixels
+    shadow_blur: f64 = 0.0,                     // the shadow's sigma, pixels
 }
 
 // A blur of sigma at least this (pixels) runs at half resolution, and of
@@ -138,7 +138,8 @@ var BLUR_DOWNSAMPLE_FROM: f32 = 5.0;
 // (3 sigma and a texel; at a lower resolution a texel more each for the
 // rounding to texels and the upsample's interpolation).
 struct BlurPlan { factor: i64, sigma: f32, reach: f32 }
-fn blur_plan(sigma: f32) -> BlurPlan {
+fn blur_plan(sigma_in: f64) -> BlurPlan {
+    let sigma = sigma_in as f32;
     var f = 1;
     if sigma >= BLUR_DOWNSAMPLE_FROM { f = 2; }
     if sigma >= 2.0 * BLUR_DOWNSAMPLE_FROM { f = 4; }
@@ -251,7 +252,8 @@ fn layer<F>(d: LayerDesc) {
     } else {
         composites[clearing].scissor = cleared;
     }
-    let content_bounds = inflate(drawn, float2 { 3.0 * d.blur + 1.0, 3.0 * d.blur + 1.0 });
+    let content_reach = (3.0 * d.blur + 1.0) as f32;
+    let content_bounds = inflate(drawn, float2 { content_reach, content_reach });
     // A blur at a lower resolution starts from the layer downsampled: once
     // for both the blur and the shadow when they run at the same one.
     var down = gfx::Texture { 0 };
@@ -268,7 +270,8 @@ fn layer<F>(d: LayerDesc) {
     var shadow_bounds = Bounds { .. };
     if shadowed {
         shadow = if d.shadow_blur > 0.0 { blurred(tex, sp, drawn, shadow_down) } else { tex };
-        shadow_bounds = offset(inflate(drawn, float2 { 3.0 * d.shadow_blur + 1.0, 3.0 * d.shadow_blur + 1.0 }),
+        let shadow_reach = (3.0 * d.shadow_blur + 1.0) as f32;
+        shadow_bounds = offset(inflate(drawn, float2 { shadow_reach, shadow_reach }),
                                d.shadow_offset);
     }
     open_pass(back.target, back.resolve, back.samples, false);
@@ -277,7 +280,7 @@ fn layer<F>(d: LayerDesc) {
         if !is_nothing(sc) {
             composite(shadow, gfx::Texture { 0 },
                       CompositeUniforms { tint: to_float4(d.shadow), offset: d.shadow_offset,
-                                          opacity: d.opacity, blend: BLEND_NORMAL as u32, shadow: 1,
+                                          opacity: d.opacity as f32, blend: BLEND_NORMAL as u32, shadow: 1,
                                           clip: clip, scale: if d.shadow_blur > 0.0 { sp.factor } else { 1.0 },
                                           .. }, sc);
         }
@@ -294,7 +297,7 @@ fn layer<F>(d: LayerDesc) {
             blur_pass(if back.resolve.id != 0 { back.resolve } else { back.target }, backdrop, float2_0, 0.0, sc);
             open_pass(back.target, back.resolve, back.samples, false);
         }
-        composite(content, backdrop, CompositeUniforms { opacity: d.opacity, blend: clamp(d.blend, 0, 15) as u32,
+        composite(content, backdrop, CompositeUniforms { opacity: d.opacity as f32, blend: clamp(d.blend, 0, 15) as u32,
                                                          clip: clip, scale: if d.blur > 0.0 { bp.factor } else { 1.0 },
                                                          .. }, sc);
     }

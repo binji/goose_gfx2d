@@ -163,9 +163,12 @@ gfx2d::clip_rounded_rect(0, 0, 300, 200, 24) {
   default and doesn't narrow to `f32` implicitly. Integers, `f32` and
   `f64` all pass to an `f64` parameter, so `circle(x, y, r, c)` works
   whatever types the caller's variables have. The library narrows to `f32`
-  internally. Structs that are GPU data, or that are built from
-  `float2`/`float4` (`Affine`, `Rect`, corner radii), stay `f32`.
-  `rect_of(x, y, w, h)` builds a `Rect` from any numbers.
+  internally. The same for the numbers in structs the caller writes
+  (`TextStyle`, `Stroke`, `LayerDesc`, `Stop`): `f64`, so
+  `LayerDesc { blur: 3 + 3 * sin(t) }` needs no cast. Structs that are GPU
+  data, or that are built from `float2`/`float4` (`Affine`, `Rect`, corner
+  radii), stay `f32`. `rect_of(x, y, w, h)` builds a `Rect` from any
+  numbers.
 * **High-density displays.** `gfx` works in pixels and reports the mouse in
   pixels. A base scale (`gfx2d::set_scale(s)`, or `frame(clear, scale)`), so
   that a program can draw in logical units with hit testing dividing the

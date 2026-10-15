@@ -217,7 +217,8 @@ Single runs here swung by 2x between them, so compare cases within one run.
 
 ## API and packaging
 
-17. **f32 fields in structs the user writes.** `TextStyle.size`,
+17. ~~**f32 fields in structs the user writes.**~~ Done; the four casts in
+    the examples are gone, and every example builds. `TextStyle.size`,
     `Stroke.width`, `dash`, `LayerDesc`'s numbers and `Stop.offset` are
     `f32`, against the rule that scalars are `f64` so any number passes;
     the logo example needs `as f32` casts. *Change:* `f64` in those structs

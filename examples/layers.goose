@@ -86,7 +86,7 @@ fn main() {
             }
 
             // A blur, pulsing; and box shadows of three softnesses.
-            gfx2d::layer(gfx2d::LayerDesc { blur: (3 + 3 * sin(t * 2)) as f32 }) {
+            gfx2d::layer(gfx2d::LayerDesc { blur: 3 + 3 * sin(t * 2) }) {
                 gfx2d::text(480, 270, "blurred", 40, ink);
             };
             for k in 3 {

@@ -1429,7 +1429,7 @@ fn stroke(p: const Path&, s: Stroke, c) {
     guard drawing();
     let scale = if s.pixels { 1.0 } else { max(pixel_scale(), 0.000001) };
     // Thinner than a pixel: a pixel wide, as faint as it is thin.
-    let k = min(abs(s.width) * scale, 1.0);
+    let k = min((abs(s.width) as f32) * scale, 1.0);
     let once = !(k >= 1.0 && stroke_opaque(c));
     tess_out.resize(0);
     tess_idx.resize(0);
@@ -1439,7 +1439,7 @@ fn stroke(p: const Path&, s: Stroke, c) {
         flat_pts.resize(0);
         flat_contours.resize(0);
         flatten(p, state.transform, TOLERANCE, flat_pts, flat_contours);
-        stroke_contours(flat_pts, flat_contours, s, max(abs(s.width), 1.0) * 0.5, 1.0, TOLERANCE,
+        stroke_contours(flat_pts, flat_contours, s, (max(abs(s.width), 1.0) * 0.5) as f32, 1.0, TOLERANCE,
                         fringe(), once, tess_out, tess_idx);
         add_mesh(tess_out, tess_idx, c, k, false);
     } else {

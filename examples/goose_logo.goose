@@ -125,7 +125,7 @@ fn main() {
                              gfx2d::FIT_CONTAIN);
         let placed = gfx2d::transformed_bounds(fit, bounds);
         let cream = gfx2d::rgb(0xF5F1E8);
-        let name_style = gfx2d::TextStyle { size: name_size as f32, align: gfx2d::ALIGN_CENTER };
+        let name_style = gfx2d::TextStyle { size: name_size, align: gfx2d::ALIGN_CENTER };
         let name_y = placed.y + placed.h + name_size * 0.15;
         let shine = gloss(u, placed.x, placed.x + placed.w, size.y * 0.5);
         gfx2d::frame(gfx2d::rgb(0x101018)) {
@@ -143,7 +143,7 @@ fn main() {
                 let band = gfx2d::with_opacity(shine, strength);
                 gfx2d::transform(fit) { gfx2d::fill(moving, band); };
                 gfx2d::text(size.x / 2, name_y, "goose_gfx2d", name_style, band);
-                gfx2d::layer(gfx2d::LayerDesc { opacity: (0.6 * strength) as f32,
+                gfx2d::layer(gfx2d::LayerDesc { opacity: 0.6 * strength,
                                                 blend: gfx2d::BLEND_ADD, blur: 8 }) {
                     gfx2d::transform(fit) { gfx2d::fill(moving, shine); };
                     gfx2d::text(size.x / 2, name_y, "goose_gfx2d", name_style, shine);

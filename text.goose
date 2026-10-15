@@ -388,13 +388,13 @@ let BASELINE_BOTTOM = 3;        // the bottom of the last line
 
 struct TextStyle {
     font: Font = Font { 0 },        // none: default_font()
-    size: f32 = 16.0,               // the em, in pixels
+    size: f64 = 16.0,               // the em, in pixels
     align: i32 = 0,                 // ALIGN_LEFT: lines from x; CENTER about it; RIGHT to it
     baseline: i32 = 0,              // BASELINE_TOP
-    line_spacing: f32 = 1.0,        // times the font's own line height
-    letter_spacing: f32 = 0.0,      // pixels added after each character
-    wrap_width: f32 = 0.0,          // lines broken at spaces to fit; 0: only at newlines
-    outline: f32 = 0.0,             // > 0: the glyphs' outline, this many pixels wide, not the glyphs
+    line_spacing: f64 = 1.0,        // times the font's own line height
+    letter_spacing: f64 = 0.0,      // pixels added after each character
+    wrap_width: f64 = 0.0,          // lines broken at spaces to fit; 0: only at newlines
+    outline: f64 = 0.0,             // > 0: the glyphs' outline, this many pixels wide, not the glyphs
 }
 
 // The UTF-8 character at s[i], and where the next starts. A byte that does
@@ -652,7 +652,7 @@ fn text(x: f64, y: f64, s: const u8[:], style: TextStyle, c) {
     // horizontal strokes stay sharp.
     let m = current_transform();
     let plain = m.b == 0.0 && m.c == 0.0 && m.a == 1.0 && m.d == 1.0;
-    let k = style.size / BASE_SIZE;
+    let k = (style.size / BASE_SIZE) as f32;
     let stroke = style.outline > 0.0;
     for l in laid_lines {
         var left = x;
@@ -669,7 +669,7 @@ fn text(x: f64, y: f64, s: const u8[:], style: TextStyle, c) {
                 let local = mul(translation(left + p.x + (slot.xoff + hw) * k, line_y + (slot.yoff + hh) * k),
                                 scaling(k));
                 add(KIND_GLYPH, if stroke { FLAG_STROKE } else { 0 }, local,
-                    geom(hw, hh, if stroke { style.outline / k } else { 0.0 }, 0.0),
+                    geom(hw, hh, if stroke { (style.outline as f32) / k } else { 0.0 }, 0.0),
                     geom(slot.x, slot.y, slot.w, slot.h), c);
             }
         }

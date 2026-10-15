@@ -27,7 +27,8 @@ fn main() {
 **Conventions**
 * **Coordinates:** pixels, with y down, as `gfx`'s screen has them.
   Angles are radians, clockwise on the screen. Hues are in turns (0 to 1).
-* **Scalar parameters are `f64`**, so integers, `f32` and `f64` all pass.
+* **Scalar parameters are `f64`**, so integers, `f32` and `f64` all pass;
+  so are the numbers in `TextStyle`, `Stroke`, `LayerDesc` and `Stop`.
   Points are `float2`, and structs that go to the GPU are `f32`.
 * **Paints:** every shape, path, image and text call takes a `Color` or a
   `Paint` in the same position.

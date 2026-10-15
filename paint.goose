@@ -82,7 +82,7 @@ let MAX_STOPS = 16;
 
 // --- types ---------------------------------------------------------------------------
 
-struct Stop { offset: f32, color: Color }
+struct Stop { offset: f64, color: Color }
 
 // Field defaults spell the constants' values (a default may run before any
 // global is set), and say which.
@@ -196,13 +196,13 @@ fn gradient_at(g: Gradient, t: f32) -> Color {
     let n = g.stops.len;
     if n == 0 { return TRANSPARENT; }
     var prev = g.stops[0];
-    if t <= prev.offset { return prev.color; }
+    if t <= prev.offset as f32 { return prev.color; }
     for i in 1..n {
         var s = g.stops[i];
         s.offset = max(s.offset, prev.offset);
-        if t <= s.offset {
-            let span = s.offset - prev.offset;
-            let k = if span > 0.0 { (t - prev.offset) / span } else { 1.0 };
+        if t <= s.offset as f32 {
+            let span = (s.offset - prev.offset) as f32;
+            let k = if span > 0.0 { (t - prev.offset as f32) / span } else { 1.0 };
             return match g.space {
                 INTERPOLATE_LINEAR => mix_linear(prev.color, s.color, k),
                 INTERPOLATE_OKLAB => mix(prev.color, s.color, k),
@@ -233,7 +233,7 @@ fn append_ramp(g: Gradient, out: u8[>..<]&) {
     var off: f32[16] = [0.0; 16];
     var pm: float4[16] = [float4_0; 16];
     for st, i in g.stops {
-        off[i] = if i > 0 { max(st.offset, off[i - 1]) } else { st.offset };
+        off[i] = if i > 0 { max(st.offset as f32, off[i - 1]) } else { st.offset as f32 };
         pm[i] = premultiplied(st.color);
     }
     var j = 1;
