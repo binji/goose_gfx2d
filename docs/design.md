@@ -791,25 +791,83 @@ Goose compiler builds the first time a program uses the package.
 those glyphs are fixed-size bitmaps, and scalable, paintable text is one of
 this library's main features. The two can be used in the same frame.
 
-## Clipping and layers
+## Clipping and layers (`layer.goose`)
 
-* **Rectangle clips.** `clip_rect(x, y, w, h) { }` uses `gfx::scissor`
-  when the current transform is axis-aligned, intersects with the clip
-  already in effect, and costs nothing per instance.
-* **Shape clips.** `clip_rounded_rect`, `clip_circle` and `clip_path` handle
-  clips under rotation. Analytic clips (a rounded rectangle or circle)
-  travel with each instance as a clip SDF that is evaluated in the
-  fragment shader. That covers the common cases, such as rounded panels and
-  circular avatars, without a separate pass. An arbitrary `clip_path`
-  renders the path's anti-aliased coverage into an R8 mask texture the
-  size of the clip's bounds. Draws inside the clip sample that texture and
-  multiply by it. Nested path clips multiply their masks together.
-* **Layers** (`layer(LayerDesc { opacity, blend, filter }) { … }`) draw into
-  an offscreen texture of the region they cover and then composite it. This
-  is what group opacity (a translucent group whose overlapping parts don't
-  double up), the non-separable blend modes and filters (`blur(radius)`,
-  `drop_shadow`, `color_matrix`) are built on. Layer textures are pooled by
-  size for the duration of a frame.
+Both are scoped blocks: the clip or layer applies to what the block draws
+and ends with it.
+
+* **Analytic clips:** `clip_rect`, `clip_rounded_rect` (one radius or four),
+  `clip_circle` and `clip_ellipse`.
+  * Each is a 64-byte clip record (the pixel-to-clip transform, its kind,
+    half extents and radii) in a per-frame storage buffer, with its parent
+    clip.
+  * Every shape instance carries the index of the clip it was drawn under.
+    Every mesh batch carries one in a uniform, which keeps mesh vertices at
+    24 bytes.
+  * The fragment shaders multiply coverage by the clip chain's coverage
+    (`clip_coverage.glsl`). That's the clip's distance function,
+    antialiased with the pixel size taken from the clip transform's
+    determinant, so it's correct under rotation and skew.
+  * Nesting is the chain. An analytic clip costs no pass and no batch
+    break; `clips` draws 10,000 shapes under 100 rounded clips in one
+    draw call.
+  * Clips are exact on pixel boundaries, and within about 1/8 px per
+    pixel of edge at fractional ones.
+* **Path clips:** `clip_path(path, rule) { }`.
+  * The path is filled (with its fringe) into an R8 mask texture of the
+    target's size, from the pool, in a pass of its own.
+  * It's filled under the clips already in effect, so the mask contains
+    them and the mask clip's parent is none.
+  * Draws inside sample the mask at their pixel, and a mask breaks batches
+    (it's a texture binding). Each path clip costs a mask pass, plus a
+    pass to resume the target.
+* **Layers:** `layer(LayerDesc { opacity, blend, blur, shadow, shadow_offset, shadow_blur }) { }`,
+  or `layer(opacity) { }`.
+  * The block is drawn into a pooled RGBA8 texture of the target's size,
+    cleared, in its own pass, with the clip reset. The clip in effect at
+    the layer applies to its compositing instead, so blurs and shadows are
+    clipped too.
+  * The target's pass then resumes, and a full-target triangle composites
+    the layer (`composite.frag`).
+  * `NORMAL`, `ADD`, `MULTIPLY` and `REPLACE` composite with gfx's
+    fixed-function blending, the same as paints.
+  * `SCREEN`, `OVERLAY`, `DARKEN`, `LIGHTEN`, `COLOR_DODGE`, `COLOR_BURN`,
+    `HARD_LIGHT`, `SOFT_LIGHT`, `DIFFERENCE` and `EXCLUSION` (the W3C
+    separable modes), and `ERASE` (destination-out) and `KEEP`
+    (destination-in), need what's under the layer. The target is copied
+    into a backdrop texture by a copy pass, and the shader blends the two
+    and writes the result.
+  * `blur` (a gaussian's sigma) blurs the layer with two separable passes.
+  * A drop shadow composites the layer's alpha, blurred by `shadow_blur`,
+    in `shadow`'s color at `shadow_offset`, before the layer itself.
+  * A paint whose blend is one of the layer-only modes is a misuse.
+* **`box_shadow(x, y, w, h, r, blur, paint, spread)`** is a shape: one
+  instance (`KIND_SHADOW`). Its coverage is a rounded box convolved with a
+  gaussian, worked out in closed form across one axis and in four steps
+  along the other (Evan Wallace's method). `blur` is CSS's box-shadow
+  blur, twice the sigma.
+* **Multisampled frames:** `begin(target, clear, samples)` and
+  `frame(clear, samples) { }`.
+  * The frame draws into a pooled multisampled texture that resolves into
+    the target at every pass end. gfx stores multisampled contents across
+    passes, so layers and path clips can split the frame.
+  * Paths drawn into it get no fringe, since the samples antialias them.
+    Analytic shapes keep their own antialiasing.
+  * Drawing over a target without clearing copies it in first.
+* **Passes.** A frame is a list of passes, and everything is still
+  uploaded once.
+  * A draw pass draws a run of batches into a target, multisampled and
+    resolved or not.
+  * A blur pass draws a texture blurred one way, or copied, into another.
+  * A layer adds 2 passes, a backdrop blend mode 2 more, each blur 2, and
+    a path clip 2. A draw pass with nothing to draw that clears nothing
+    is skipped.
+  * Pooled textures come back every frame and are made again only when
+    the target's size changes or gfx is reopened.
+* **Later:** a color-matrix filter, glow, scissor for axis-aligned
+  rectangle clips (cheaper than the shader, but without antialiasing at
+  fractional edges), and layers the size of their contents rather than of
+  the target.
 
 ## Rendering architecture
 
@@ -950,9 +1008,9 @@ Ordered by value to typical users. The first group belongs in v1.
    SDF atlas, measuring and layout (alignment, baselines, wrapping,
    kerning, fallbacks), outlines, the API check, and `examples/text.goose`.
    Glow and a bitmap mode for small text are left for later.
-5. **Clip and layers**: rectangle and analytic clips, R8 mask clips,
-   layers with group opacity and the shader-composited blend modes, blur
-   and shadows, MSAA canvases.
+5. **Clip and layers** (done): analytic and path clips, layers with group
+   opacity, every blend mode, blur and drop shadows, `box_shadow`,
+   multisampled frames, and `examples/layers.goose`.
 6. **Polish**: camera and hit testing, pixel-art mode, statistics, the
    showcase, and docs (`docs/gfx2d.md` written as goose_gfx's `gfx.md` is).
 

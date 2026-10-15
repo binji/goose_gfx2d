@@ -7,7 +7,7 @@ lines, polygons and Bézier paths), fills and strokes, solid, gradient and
 image paints with blend modes, 2D transforms, clipping, color math, and
 scalable SDF text. All of it is drawn through `gfx` and SDL3's GPU API.
 
-**Status: phases 1 to 4 of [the design](docs/design.md).** These work:
+**Status: phases 1 to 5 of [the design](docs/design.md).** These work:
 - shapes (rectangles, rounded rectangles, circles, ellipses, rings, pies,
   arcs and lines; filled or outlined),
 - transforms and colors,
@@ -16,9 +16,12 @@ scalable SDF text. All of it is drawn through `gfx` and SDL3's GPU API.
 - paths (Bézier curves, nonzero and even-odd fills, strokes with joins,
   caps and dashes, polygons, polylines),
 - text (TrueType/OpenType fonts, a built-in Inter, SDF glyphs at any size
-  and transform, kerning, alignment, wrapping, outlines, any paint).
+  and transform, kerning, alignment, wrapping, outlines, any paint),
+- clips and layers as scoped blocks (rectangle, rounded rectangle, circle,
+  ellipse and path clips; layers with group opacity, every blend mode,
+  blur and drop shadows), box shadows, and multisampled frames.
 
-Clipping and layers come next.
+Polish (a 2D camera, pixel-art mode, more examples) comes next.
 
 ## Using it
 
@@ -43,6 +46,7 @@ fn main() {
 | `gfx2d.goose` | the entry: frames, the current transform, shapes, images, paths' drawing, and the renderer |
 | `color.goose`, `transform.goose`, `paint.goose`, `path.goose` | colors; affine transforms and rectangles; paints and gradient ramps; paths, tessellation and stroking: plain Goose, no GPU |
 | `text.goose` | fonts, the glyph atlas, layout and drawing text |
+| `layer.goose` | clips and layers, as scoped blocks |
 | `gfx2d.build` | the package's sidecar: the CMake target to build, and that its functions run on the main thread only |
 | `CMakeLists.txt` | builds the text layer (stb_truetype) as a static library, carried by the target `goose_gfx2d_package` |
 | `src/shaders/` | the GLSL that `gfx2d.goose` embeds with `embed_shader` |

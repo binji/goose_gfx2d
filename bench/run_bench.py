@@ -43,7 +43,14 @@ CASES = {
     "text_wrapped": "the same as one paragraph wrapped to 1,900px",
     "text_labels": "1,000 labels at random sizes, turned",
     "glyph_raster": "162 glyphs rasterized again from an empty atlas",
+    "clips": "100 rounded-rect clips, 100 circles in each",
+    "path_clips": "20 star-shaped path clips, 50 rects in each",
+    "layers": "20 layers at half opacity, 50 circles in each",
+    "blend_layers": "10 layers in screen, overlay, ... modes, 20 circles in each",
+    "blur": "a blurred layer with a drop shadow, 200 rounded rects",
+    "box_shadows": "2,000 box shadows under 2,000 rounded rects",
     "ui_scene": "60 panels: nine-slices, gradients, text, buttons, icons, charts",
+    "ui_scene_msaa": "the same, multisampled 4 times",
 }
 
 
@@ -125,9 +132,9 @@ def main():
     rows = []
     for line in r.stdout.splitlines():
         if line.startswith("case "):
-            name, frames, rec, end, gpu, inst, tris, draws, nbytes = line.split()[1:]
+            name, frames, rec, end, gpu, inst, tris, draws, nbytes, npasses = line.split()[1:11]
             rows.append((name, float(rec), float(end), float(gpu), int(inst), int(tris), int(draws),
-                         int(nbytes)))
+                         int(nbytes), int(npasses)))
 
     lines = [
         "# gfx2d benchmark results",
@@ -153,12 +160,12 @@ def main():
         "(uploads and the pass), both CPU; *gpu* is `gfx::flush()`, submitting and "
         "waiting for the GPU.",
         "",
-        "| case | draws what | record | end | gpu | total | instances | triangles | draw calls | uploaded |",
-        "|---|---|--:|--:|--:|--:|--:|--:|--:|--:|",
+        "| case | draws what | record | end | gpu | total | instances | triangles | draw calls | passes | uploaded |",
+        "|---|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|",
     ]
-    for name, rec, end, gpu, inst, tris, draws, nbytes in rows:
+    for name, rec, end, gpu, inst, tris, draws, nbytes, npasses in rows:
         lines.append(f"| `{name}` | {CASES.get(name, '')} | {rec:.2f} | {end:.2f} | {gpu:.2f} | "
-                     f"{rec + end + gpu:.2f} | {inst:,} | {tris:,} | {draws:,} | "
+                     f"{rec + end + gpu:.2f} | {inst:,} | {tris:,} | {draws:,} | {npasses} | "
                      f"{nbytes / 1e6:.1f} MB |")
     lines.append("")
     with open(args.out, "w", newline="\n") as fh:

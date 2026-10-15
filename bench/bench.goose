@@ -23,7 +23,7 @@
 // varies between frames is the timing only.
 //
 // Output lines are `case <name> <frames> <record> <end> <gpu> <instances>
-// <triangles> <draws> <bytes uploaded>`, for run_bench.py.
+// <triangles> <draws> <bytes uploaded> <passes>`, for run_bench.py.
 
 import std;
 import vec;
@@ -77,8 +77,9 @@ fn wanted(name: const u8[:]) -> bool {
     false
 }
 
-// Times the case: F(frame) draws one frame's content.
-fn run<F>(name: const u8[:]) {
+// Times the case: F(frame) draws one frame's content, multisampled
+// `samples` times if more than 1.
+fn run<F>(name: const u8[:], samples: i64 = 1) {
     if listing { print(name); return; }
     guard wanted(name);
     var record: f64[>..] = [];
@@ -86,7 +87,7 @@ fn run<F>(name: const u8[:]) {
     var gpu: f64[>..] = [];
     for i in WARMUP + frames {
         let t0 = clock_ns();
-        gfx2d::begin(target, gfx2d::WHITE);
+        gfx2d::begin(target, gfx2d::WHITE, samples);
         F(i);
         let t1 = clock_ns();
         gfx2d::end();
@@ -104,7 +105,7 @@ fn run<F>(name: const u8[:]) {
     let e = median(end);
     let g = median(gpu);
     print("case ", name, " ", frames, " ", ms(r), " ", ms(e), " ", ms(g), " ", s.instances, " ",
-          s.triangles, " ", s.draws, " ", s.bytes);
+          s.triangles, " ", s.draws, " ", s.bytes, " ", s.passes);
 }
 
 // --- shapes ------------------------------------------------------------------------
@@ -309,6 +310,75 @@ fn glyph_raster() {
     gfx2d::text(10, 60, "àáâãäåæçèéêëìíîïñòóôõöøùúûüýÿ ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÑÒÓÔÕÖØÙÚÛÜÝ €£¥©®™—–…→←", 24, gfx2d::BLACK);
 }
 
+// --- clips and layers ------------------------------------------------------------------
+
+// 100 rounded-rect clips, 100 shapes in each: analytic clips cost shading.
+fn clips() {
+    seed(15);
+    for k in 100 {
+        let x = rand(0, W - 200);
+        let y = rand(0, H - 150);
+        gfx2d::clip_rounded_rect(x, y, 200, 150, 20) {
+            for i in 100 { gfx2d::circle(x + rand(-20, 220), y + rand(-20, 170), rand(4, 20), rand_color()); }
+        };
+    }
+}
+
+// 20 star-shaped path clips: a mask pass each.
+fn path_clips() {
+    seed(16);
+    for k in 20 {
+        var p = gfx2d::Path {};
+        let x = rand(100, W - 100);
+        let y = rand(100, H - 100);
+        gfx2d::star(p, x, y, 5, 90, 40);
+        gfx2d::clip_path(p) {
+            for i in 50 { gfx2d::rect(x - 100 + i * 4, y - 100, 2, 200, rand_color()); }
+        };
+    }
+}
+
+// 20 layers at half opacity: a pass and a composite each.
+fn layers() {
+    seed(17);
+    for k in 20 {
+        gfx2d::layer(0.5) {
+            for i in 50 { gfx2d::circle(rand(0, W), rand(0, H), rand(10, 40), rand_color()); }
+        };
+    }
+}
+
+// 10 layers in modes that need the backdrop: a copy pass more each.
+fn blend_layers() {
+    seed(18);
+    gfx2d::rect(0, 0, W, H, gfx2d::linear(0, 0, W, H, gfx2d::NAVY, gfx2d::ORANGE));
+    for k in 10 {
+        gfx2d::layer(gfx2d::LayerDesc { blend: (gfx2d::BLEND_SCREEN + k % 8) as i32 }) {
+            for i in 20 { gfx2d::circle(rand(0, W), rand(0, H), rand(20, 80), rand_color()); }
+        };
+    }
+}
+
+// One blurred layer and one drop shadow, the whole target: four blur passes.
+fn blur() {
+    seed(19);
+    gfx2d::layer(gfx2d::LayerDesc { blur: 8, shadow: gfx2d::rgba(0x000000, 0.5),
+                                    shadow_offset: float2 { 8, 8 }, shadow_blur: 12 }) {
+        for i in 200 { gfx2d::rounded_rect(rand(0, W), rand(0, H), 80, 50, 10, rand_color()); }
+    };
+}
+
+// 2,000 box shadows under 2,000 cards.
+fn box_shadows() {
+    seed(20);
+    for i in 2000 {
+        let x = rand(0, W);
+        let y = rand(0, H);
+        gfx2d::box_shadow(x, y + 4, 60, 40, 8, 12, gfx2d::rgba(0x000000, 0.4));
+        gfx2d::rounded_rect(x, y, 60, 40, 8, gfx2d::WHITE);
+    }
+}
+
 // --- a scene ------------------------------------------------------------------------------
 
 var panel: gfx::Texture;
@@ -417,6 +487,13 @@ fn main() {
     run("text_wrapped") { f => text_wrapped(); };
     run("text_labels") { f => text_labels(); };
     run("glyph_raster") { f => glyph_raster(); };
+    run("clips") { f => clips(); };
+    run("path_clips") { f => path_clips(); };
+    run("layers") { f => layers(); };
+    run("blend_layers") { f => blend_layers(); };
+    run("blur") { f => blur(); };
+    run("box_shadows") { f => box_shadows(); };
     run("ui_scene") { f => ui_scene(); };
+    run("ui_scene_msaa", 4) { f => ui_scene(); };
     if !listing { gfx::close(); }
 }

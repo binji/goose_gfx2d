@@ -36,6 +36,7 @@ import transform;
 import paint;
 import path;
 import text;
+import layer;
 
 // --- instances: src/shaders/shape.glsl ------------------------------------------
 
@@ -45,6 +46,7 @@ let KIND_PIE: u32 = 2;
 let KIND_ARC: u32 = 3;
 let KIND_ARC_BUTT: u32 = 4;
 let KIND_GLYPH: u32 = 5;
+let KIND_SHADOW: u32 = 6;
 
 let FLAG_STROKE: u32 = 1;
 // A rectangle's sides drawn hard (shape.glsl): where pieces meet.
@@ -66,7 +68,7 @@ struct Instance {
     lm: float4,             // local space to the paint's space
     lt: float2,
     paint: u32,             // in paints; 0: the color alone
-    pad 4
+    clip: u32,              // in clips; 0: none
 }
 
 // One paint, as src/shaders/paint.glsl reads it: 96 bytes in std430.
@@ -96,9 +98,27 @@ struct MeshVertex {
     paint: u32,
 }
 
+// A clip, as src/shaders/clip.glsl reads it: 64 bytes in std430.
+struct ClipGPU {
+    m: float4,              // pixels to the clip's local space
+    t: float2,
+    kind: u32,              // CLIP_*
+    parent: u32,
+    geom: float4,           // half extents; a mask's size
+    radii: float4,
+}
+let CLIP_NONE: u32 = 0;
+let CLIP_BOX: u32 = 1;
+let CLIP_ELLIPSE: u32 = 2;
+let CLIP_MASK: u32 = 3;
+let CLIP_SIZE = 64;
+
 // The shaders' uniform blocks, rounded to 16 bytes as std140 does.
 struct FrameUniforms { view: float4, base: u32, pad 12 }
-struct BlendUniforms { blend: u32, pad 12 }
+struct BlendUniforms { blend: u32, clip: u32, pad 8 }     // clip: a mesh batch's
+struct CompositeUniforms { tint: float4, offset: float2, opacity: f32, blend: u32, shadow: u32,
+                           clip: u32, pad 8 }
+struct BlurUniforms { dir: float2, sigma: f32, pad 4 }
 
 // How a line or an arc ends.
 let CAP_BUTT = 0;       // at the end point
@@ -125,24 +145,82 @@ struct Renderer {
     white: gfx::Texture = gfx::Texture { 0 },   // bound where a paint has no image
     // By filter * 3 + wrap: FILTER_* and gfx's REPEAT, MIRROR, CLAMP.
     samplers: gfx::Sampler[6] = [gfx::Sampler { 0 }; 6],
+    clips: gfx::Buffer = gfx::Buffer { 0 },
+    clip_bytes: i64 = 0,
+    // Layers composited, by gfx blend: the fixed-function modes, and NONE
+    // for those the shader blends with the backdrop.
+    composite: gfx::Pipeline[4] = [gfx::Pipeline { 0 }; 4],
+    blur: gfx::Pipeline = gfx::Pipeline { 0 },
 }
 var renderer: Renderer;
 
-// What one draw call draws: a run of shape instances, or of mesh indices;
-// one blend mode, one image.
+// Textures a frame draws layers, masks and blurs in, kept from frame to
+// frame and handed out again: free until a frame takes one.
+struct Pooled { texture: gfx::Texture, w: i64, h: i64, format: i32, samples: i32, used: bool }
+var pool: Pooled[>..<] = [];
+
+// A texture of the pool, free this frame, made if there is none.
+fn pooled(w: i64, h: i64, format: i32, samples: i32) -> gfx::Texture {
+    for &t in pool {
+        if !t.used && t.w == w && t.h == h && t.format == format && t.samples == samples {
+            t.used = true;
+            return t.texture;
+        }
+    }
+    let usage = if samples > 1 { gfx::COLOR_TARGET } else { gfx::COLOR_TARGET | gfx::SAMPLED };
+    let t = gfx::texture(gfx::TextureDesc { format: format, usage: usage, width: w as i32,
+                                            height: h as i32, samples: samples });
+    pool.push(Pooled { t, w, h, format, samples, true });
+    t
+}
+
+// What one draw call draws: a run of shape instances, or of mesh indices,
+// in one blend mode, with one image and one clip mask; or a layer
+// composited (first: its index in composites).
 let BATCH_SHAPES = 0;
 let BATCH_MESH = 1;
-struct Batch { kind: i64, first: i64, count: i64, blend: i32, texture: gfx::Texture, sampler: i64 }
+let BATCH_COMPOSITE = 2;
+struct Batch { kind: i64, first: i64, count: i64, blend: i32, texture: gfx::Texture, sampler: i64,
+               mask: gfx::Texture, clip: u32 }    // clip: a mesh batch's; shapes carry theirs
+
+// A layer's compositing: its texture (or its blur's) onto the target, with
+// a copy of what was under it where its blend mode needs one.
+struct Composite { layer: gfx::Texture, backdrop: gfx::Texture, u: CompositeUniforms }
+
+// A frame is passes, in order. A draw pass draws a run of batches into a
+// target, multisampled and resolved into `resolve` where that is given; a
+// blur pass draws `src` blurred one way (or copied, sigma 0) into a target.
+let PASS_DRAW = 0;
+let PASS_BLUR = 1;
+struct Pass {
+    kind: i64,
+    target: gfx::Texture,
+    resolve: gfx::Texture,
+    samples: i32,
+    clear: bool,
+    clear_color: float4,
+    first_batch: i64,
+    end_batch: i64,
+    src: gfx::Texture,
+    blur: BlurUniforms,
+}
 
 // The frame being recorded.
 struct FrameState {
     drawing: bool,
     target: gfx::Texture,
-    clear: bool,
-    clear_color: Color,
+    width: i64,
+    height: i64,
     transform: Affine,
+    pass: i64,              // the draw pass draws go into now
+    clip: u32,              // the clip they are under; 0: none
 }
 var state = FrameState { transform: IDENTITY, .. };
+
+var passes: Pass[>..<] = [];
+var composites: Composite[>..<] = [];
+var clips: ClipGPU[>..<] = [];
+var clip_masks: gfx::Texture[>..<] = [];    // by clip: the mask texture its chain samples
 
 var instances: Instance[>..<] = [];
 var mesh_vertices: MeshVertex[>..<] = [];
@@ -157,7 +235,8 @@ var saved: Affine[>..<] = [];               // push()'s transforms
 
 // What the last end() drew.
 struct Stats { instances: i64, triangles: i64, draws: i64, paints: i64, ramps: i64,
-               bytes: i64 }     // uploaded: instances, mesh vertices and indices, paints
+               bytes: i64,      // uploaded: instances, mesh vertices and indices, paints, clips
+               passes: i64, clips: i64 }
 var last_stats: Stats;
 
 var misuse_count = 0;
@@ -179,18 +258,43 @@ fn stats() -> Stats { last_stats }
 
 // --- frames --------------------------------------------------------------------------
 
-// Starts drawing into `target`, a color target, cleared to `clear`.
-fn begin(target: gfx::Texture, clear: Color) { begin_into(target, true, clear); }
+// Starts drawing into `target`, a color target, cleared to `clear`;
+// multisampled `samples` times (2, 4 or 8) and resolved into it, with paths
+// antialiased by the samples instead of a fringe.
+fn begin(target: gfx::Texture, clear: Color, samples: i64 = 1) {
+    begin_into(target, true, clear, samples);
+}
 // Over what `target` holds.
-fn begin(target: gfx::Texture) { begin_into(target, false, TRANSPARENT); }
+fn begin(target: gfx::Texture) { begin_into(target, false, TRANSPARENT, 1); }
 // Into gfx's screen.
-fn begin_screen(clear: Color) { begin(gfx::screen(), clear); }
+fn begin_screen(clear: Color, samples: i64 = 1) { begin(gfx::screen(), clear, samples); }
 fn begin_screen() { begin(gfx::screen()); }
 
-fn begin_into(target: gfx::Texture, clear: bool, clear_color: Color) {
+fn begin_into(target: gfx::Texture, clear: bool, clear_color: Color, samples: i64) {
     if state.drawing { misuse("begin: already drawing; end() the last frame first"); }
-    state = FrameState { drawing: true, target: target, clear: clear, clear_color: clear_color,
-                         transform: IDENTITY };
+    ensure_renderer();
+    let info = gfx::texture_info(target);
+    state = FrameState { drawing: true, target: target, width: info.width, height: info.height,
+                         transform: IDENTITY, pass: 0, clip: 0 };
+    for &t in pool { t.used = false; }
+    passes.resize(0);
+    composites.resize(0);
+    clips.resize(0);
+    clip_masks.resize(0);
+    clips.push(ClipGPU { kind: CLIP_NONE, .. });
+    clip_masks.push(gfx::Texture { 0 });
+    if samples > 1 {
+        // Drawn into a multisampled texture, resolved into the target; over
+        // the target's contents, copied in first, if it is not cleared.
+        let msaa = pooled(info.width, info.height, info.format, samples as i32);
+        if !clear { blur_pass(target, msaa, float2_0, 0.0); }
+        passes.push(Pass { kind: PASS_DRAW, target: msaa, resolve: target, samples: samples as i32,
+                           clear: clear, clear_color: premultiplied(clear_color), .. });
+    } else {
+        passes.push(Pass { kind: PASS_DRAW, target: target, samples: 1, clear: clear,
+                           clear_color: premultiplied(clear_color), .. });
+    }
+    state.pass = passes.len - 1;
     instances.resize(0);
     mesh_vertices.resize(0);
     mesh_indices.resize(0);
@@ -211,18 +315,44 @@ fn end() {
     if saved.len > 0 { misuse(str("end: ", saved.len, " push() without a pop()")); }
     check();
     state.drawing = false;
+    close_pass();
     flush_batches();
 }
 
-// The screen cleared to `clear`, the block drawn, and end().
-fn frame<F>(clear: Color) {
-    begin_screen(clear);
+// --- passes ---------------------------------------------------------------------------
+
+// The current draw pass ends at the batches so far.
+fn close_pass() { passes[state.pass].end_batch = batches.len; }
+
+// Draws go into `target` from now on, in a pass of its own.
+fn open_pass(target: gfx::Texture, resolve: gfx::Texture, samples: i32, clear: bool) {
+    close_pass();
+    passes.push(Pass { kind: PASS_DRAW, target: target, resolve: resolve, samples: samples,
+                       clear: clear, first_batch: batches.len, end_batch: batches.len, .. });
+    state.pass = passes.len - 1;
+}
+
+// `src` blurred along dir (a texel, (1, 0) or (0, 1)) by sigma, or copied
+// for 0, into `target`, in a pass of its own between the draw passes.
+fn blur_pass(src: gfx::Texture, target: gfx::Texture, dir: float2, sigma: f32) {
+    passes.push(Pass { kind: PASS_BLUR, target: target, samples: 1, src: src,
+                       blur: BlurUniforms { dir: dir, sigma: sigma },
+                       first_batch: batches.len, end_batch: batches.len, .. });
+}
+
+// Whether the current pass antialiases by samples, so paths need no fringe.
+fn multisampled() -> bool { passes[state.pass].samples > 1 }
+
+// The screen cleared to `clear`, the block drawn, and end(); multisampled
+// `samples` times, if more than 1.
+fn frame<F>(clear: Color, samples: i64 = 1) {
+    begin_screen(clear, samples);
     F();
     end();
 }
 // Into a target of the program's.
-fn draw_into<F>(target: gfx::Texture, clear: Color) {
-    begin(target, clear);
+fn draw_into<F>(target: gfx::Texture, clear: Color, samples: i64 = 1) {
+    begin(target, clear, samples);
     F();
     end();
 }
@@ -250,6 +380,15 @@ fn ensure_renderer() {
     renderer.white = gfx::texture2d(1, 1);
     let white: u8[4] = [255, 255, 255, 255];
     gfx::update_texture(renderer.white, white);
+    let full = embed_shader("src/shaders/fullscreen.vert");
+    let comp = embed_shader("src/shaders/composite.frag");
+    for mode, i in modes {
+        renderer.composite[i] = gfx::pipeline(full, comp, gfx::PipelineDesc { blend: mode });
+    }
+    renderer.blur = gfx::pipeline(full, embed_shader("src/shaders/blur.frag"),
+                                  gfx::PipelineDesc { blend: gfx::BLEND_NONE });
+    // The pool's textures went with the device.
+    pool.resize(0);
 }
 
 // Puts `data` in a buffer of at least its size, made again larger when it
@@ -281,45 +420,74 @@ fn flush_batches() {
     last_stats = Stats { instances: instances.len, triangles: mesh_indices.len / 3,
                          draws: batches.len, paints: paints.len - 1, ramps: ramp_gradients.len,
                          bytes: instances.len * INSTANCE_SIZE + bytes_of(mesh_vertices).len +
-                                mesh_indices.len * 4 + paints.len * PAINT_SIZE };
-    if batches.len == 0 && !state.clear { return; }
+                                mesh_indices.len * 4 + paints.len * PAINT_SIZE + clips.len * CLIP_SIZE,
+                         passes: passes.len, clips: clips.len - 1 };
     ensure_renderer();
     if batches.len > 0 {
         upload(renderer.instances, renderer.instance_bytes, gfx::BUFFER_STORAGE, bytes_of(instances));
         upload(renderer.vertices, renderer.vertex_bytes, gfx::BUFFER_VERTEX, bytes_of(mesh_vertices));
         upload(renderer.indices, renderer.index_bytes, gfx::BUFFER_INDEX, bytes_of(mesh_indices));
         upload(renderer.paints, renderer.paint_bytes, gfx::BUFFER_STORAGE, bytes_of(paints));
+        upload(renderer.clips, renderer.clip_bytes, gfx::BUFFER_STORAGE, bytes_of(clips));
         upload_ramps();
     }
     let atlas = upload_atlas();
-    let info = gfx::texture_info(state.target);
-    var pass = gfx::PassDesc { clear_color: state.clear,
-                               color_value: premultiplied(state.clear_color), .. };
-    pass.color[0] = state.target;
-    guard gfx::begin_pass(pass) else { return; }
     let ramps = if renderer.ramp_rows > 0 { renderer.ramps } else { renderer.white };
-    for b in batches {
-        if b.kind == BATCH_SHAPES {
-            gfx::bind(renderer.pipelines[b.blend]);
-            gfx::bind_storage_buffer(gfx::VERTEX, 0, renderer.instances);
-            gfx::bind_texture(gfx::FRAGMENT, 2, if atlas.id != 0 { atlas } else { renderer.white },
-                              renderer.samplers[2]);
-        } else {
-            gfx::bind(renderer.mesh_pipelines[b.blend]);
-            gfx::bind_vertex_buffer(renderer.vertices);
-            gfx::bind_index_buffer(renderer.indices, 4);
+    let glyphs = if atlas.id != 0 { atlas } else { renderer.white };
+    let view = float4 { state.width, state.height, 0.0, 0.0 };
+    let linear = renderer.samplers[2];      // linear, clamped
+    for p in passes {
+        // A draw pass with nothing to draw that clears nothing is no pass.
+        if p.kind == PASS_DRAW && p.end_batch == p.first_batch && !p.clear { continue; }
+        var desc = gfx::PassDesc { clear_color: p.clear, color_value: p.clear_color, .. };
+        desc.color[0] = p.target;
+        desc.resolve[0] = p.resolve;
+        guard gfx::begin_pass(desc) else { return; }
+        if p.kind == PASS_BLUR {
+            gfx::bind(renderer.blur);
+            gfx::bind_texture(gfx::FRAGMENT, 0, p.src, linear);
+            gfx::uniforms(gfx::FRAGMENT, 0, p.blur);
+            gfx::draw(3);
+            gfx::end_pass();
+            continue;
         }
-        gfx::bind_storage_buffer(gfx::FRAGMENT, 0, renderer.paints);
-        gfx::bind_texture(gfx::FRAGMENT, 0, ramps, renderer.samplers[2]);   // linear, clamped
-        let image = if b.texture.id == 0 { renderer.white } else { b.texture };
-        gfx::bind_texture(gfx::FRAGMENT, 1, image, renderer.samplers[b.sampler]);
-        gfx::uniforms(gfx::VERTEX, 0, FrameUniforms {
-            view: float4 { info.width, info.height, 0.0, 0.0 }, base: b.first as u32 });
-        gfx::uniforms(gfx::FRAGMENT, 0, BlendUniforms { blend: b.blend as u32 });
-        if b.kind == BATCH_SHAPES { gfx::draw(b.count * 6); }
-        else { gfx::draw_indexed(b.count, 1, b.first, 0, 0); }
+        for b in batches[p.first_batch..p.end_batch] {
+            let mask = if b.mask.id != 0 { b.mask } else { renderer.white };
+            if b.kind == BATCH_COMPOSITE {
+                let c = composites[b.first];
+                gfx::bind(renderer.composite[b.blend]);
+                gfx::bind_texture(gfx::FRAGMENT, 0, c.layer, linear);
+                gfx::bind_texture(gfx::FRAGMENT, 1, if c.backdrop.id != 0 { c.backdrop } else { renderer.white },
+                                  linear);
+                gfx::bind_texture(gfx::FRAGMENT, 2, mask, linear);
+                gfx::bind_storage_buffer(gfx::FRAGMENT, 0, renderer.clips);
+                gfx::uniforms(gfx::FRAGMENT, 0, c.u);
+                gfx::draw(3);
+                continue;
+            }
+            let image = if b.texture.id == 0 { renderer.white } else { b.texture };
+            gfx::bind_texture(gfx::FRAGMENT, 0, ramps, linear);
+            gfx::bind_texture(gfx::FRAGMENT, 1, image, renderer.samplers[b.sampler]);
+            if b.kind == BATCH_SHAPES {
+                gfx::bind(renderer.pipelines[b.blend]);
+                gfx::bind_storage_buffer(gfx::VERTEX, 0, renderer.instances);
+                gfx::bind_texture(gfx::FRAGMENT, 2, glyphs, linear);
+                gfx::bind_texture(gfx::FRAGMENT, 3, mask, linear);
+            } else {
+                gfx::bind(renderer.mesh_pipelines[b.blend]);
+                gfx::bind_vertex_buffer(renderer.vertices);
+                gfx::bind_index_buffer(renderer.indices, 4);
+                gfx::bind_texture(gfx::FRAGMENT, 2, mask, linear);
+            }
+            gfx::bind_storage_buffer(gfx::FRAGMENT, 0, renderer.paints);
+            gfx::bind_storage_buffer(gfx::FRAGMENT, 1, renderer.clips);
+            gfx::uniforms(gfx::VERTEX, 0, FrameUniforms { view: view, base: b.first as u32 });
+            gfx::uniforms(gfx::FRAGMENT, 0, BlendUniforms { blend: b.blend as u32, clip: b.clip });
+            if b.kind == BATCH_SHAPES { gfx::draw(b.count * 6); }
+            else { gfx::draw_indexed(b.count, 1, b.first, 0, 0); }
+        }
+        gfx::end_pass();
     }
-    gfx::end_pass();
 }
 
 // The row of the frame's ramp atlas holding g's ramp, added if no
@@ -434,6 +602,9 @@ fn paint_key(p: Paint) -> PaintKey {
     let has_image = img.texture.id != 0;
     let wrap = if img.wrap == WRAP_REPEAT { 0 } else if img.wrap == WRAP_MIRROR { 1 } else { 2 };
     let sampler = (if img.filter == FILTER_NEAREST { 3 } else { 0 }) + wrap;
+    if p.blend > BLEND_REPLACE {
+        misuse("a Paint's blend mode can be NORMAL, ADD, MULTIPLY or REPLACE; the others need a layer");
+    }
     PaintKey { color: to_float4(p.color), paint: paint_index(p), blend: clamp(p.blend, 0, 3),
                texture: if has_image { img.texture } else { gfx::Texture { 0 } },
                sampler: if has_image { sampler } else { 2 } }
@@ -453,7 +624,7 @@ fn add(kind: u32, flags: u32, local: Affine, geom: float4, radii: float4, c) {
     instances.push(Instance { m: float4 { m.a, m.b, m.c, m.d }, t: float2 { m.tx, m.ty },
                               kind: kind, flags: flags, geom: geom, radii: radii, color: k.color,
                               lm: float4 { local.a, local.b, local.c, local.d },
-                              lt: float2 { local.tx, local.ty }, paint: k.paint });
+                              lt: float2 { local.tx, local.ty }, paint: k.paint, clip: state.clip });
     batch(BATCH_SHAPES, instances.len - 1, 1, k);
 }
 
@@ -463,14 +634,17 @@ fn batch(kind: i64, first: i64, count: i64, k: PaintKey) {
     let blend = k.blend;
     let texture = k.texture;
     let sampler = k.sampler;
+    let mask = clip_masks[state.clip];
+    // A mesh batch is under one clip, a uniform; shapes carry theirs.
+    let clip: u32 = if kind == BATCH_MESH { state.clip } else { 0 };
     // A batch is one blend mode and one image. A shape with no image fits
     // any batch of its blend mode (it samples the white texture, or
     // whatever is bound, and ignores it), and a batch with no image yet
     // takes the first image to come.
     let n = batches.len;
-    if n > 0 {
+    if n > passes[state.pass].first_batch {
         let last .= batches[n - 1];
-        if last.kind == kind && last.blend == blend {
+        if last.kind == kind && last.blend == blend && last.mask == mask && last.clip == clip {
             if texture.id == 0 || (last.texture == texture && last.sampler == sampler) {
                 last.count += count;
                 return;
@@ -484,7 +658,7 @@ fn batch(kind: i64, first: i64, count: i64, k: PaintKey) {
         }
     }
     batches.push(Batch { kind: kind, first: first, count: count, blend: blend, texture: texture,
-                         sampler: sampler });
+                         sampler: sampler, mask: mask, clip: clip });
 }
 
 // --- the current transform -------------------------------------------------------------
@@ -675,6 +849,18 @@ fn line(a: float2, b: float2, width: f64, c, cap: i64 = CAP_BUTT) {
     line(a.x, a.y, b.x, b.y, width, c, cap);
 }
 
+// A shadow: the rounded rectangle blurred by `blur` pixels (as CSS's
+// box-shadow blur: twice the gaussian's sigma), grown by `spread` first. One
+// instance, worked out in closed form; drawn under the box it shadows,
+// usually offset.
+fn box_shadow(x: f64, y: f64, w: f64, h: f64, r: f64, blur: f64, c, spread: f64 = 0.0) {
+    let sw = abs(w) + 2 * spread;
+    let sh = abs(h) + 2 * spread;
+    let rr = clamp(r + spread, 0.0, min(sw, sh) * 0.5);
+    add(KIND_SHADOW, 0, box_at(x - spread, y - spread, sw, sh),
+        geom(sw * 0.5, sh * 0.5, max(blur * 0.5, 0.01), 0.0), radii(rr), c);
+}
+
 // --- images ----------------------------------------------------------------------------
 //
 // An image is a rectangle painted with a texture: so it takes the current
@@ -768,6 +954,9 @@ var outline_cs: Contour[>..<] = [];
 var tess_out: TessVertex[>..<] = [];
 var tess_idx: u32[>..<] = [];
 
+// How wide a fringe paths get: a pixel, or none where samples antialias.
+fn fringe() -> f32 { if multisampled() { 0.0 } else { 1.0 } }
+
 // The current transform's scale: how many pixels a unit is, on average.
 fn pixel_scale() -> f32 { sqrt(abs(determinant(state.transform))) }
 
@@ -803,7 +992,7 @@ fn add_mesh(c, k: f32) {
 fn fill_flat(c, rule: i64) {
     tess_out.resize(0);
     tess_idx.resize(0);
-    fill_triangles(flat_pts, flat_contours, rule, 1.0, tess_out, tess_idx);
+    fill_triangles(flat_pts, flat_contours, rule, fringe(), tess_out, tess_idx);
     add_mesh(c, 1.0);
 }
 
@@ -858,7 +1047,7 @@ fn stroke(p: const Path&, s: Stroke, c) {
     while a < outline_cs.len {
         var b = a + 1;
         while b < outline_cs.len && outline_cs[b].group == outline_cs[a].group { b++; }
-        fill_triangles(outline_pts, outline_cs[a..b], NONZERO, 1.0, tess_out, tess_idx);
+        fill_triangles(outline_pts, outline_cs[a..b], NONZERO, fringe(), tess_out, tess_idx);
         a = b;
     }
     add_mesh(c, k);

@@ -62,7 +62,14 @@ where it shows:
 | `text_wrapped` | word wrapping |
 | `text_labels` | short text at many sizes and angles |
 | `glyph_raster` | rasterizing glyph distance fields: the first frame of new text |
+| `clips` | analytic clips: the clip chain in every fragment |
+| `path_clips` | path clips: a mask pass each |
+| `layers` | layers: a pass, a pass back and a composite each |
+| `blend_layers` | blend modes needing the backdrop: a copy more each |
+| `blur` | separable gaussian blur passes over the whole target |
+| `box_shadows` | analytic blurred rounded rects |
 | `ui_scene` | a mix, as an application's frame might be |
+| `ui_scene_msaa` | the same into a 4x multisampled target |
 
 Numbers depend on the machine (`results.md` records it) and are for
 comparing gfx2d with itself over time: before and after a change, on the

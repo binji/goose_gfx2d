@@ -18,6 +18,7 @@ layout(location = 4) flat out vec4 v_radii;
 layout(location = 5) flat out vec4 v_color;
 layout(location = 6) out vec2 v_user;
 layout(location = 7) flat out uint v_paint;
+layout(location = 8) flat out uint v_clip;
 
 const vec2 corners[6] = vec2[6](vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(1.0, 1.0),
                                 vec2(-1.0, -1.0), vec2(1.0, 1.0), vec2(-1.0, 1.0));
@@ -33,6 +34,7 @@ void main() {
         extent = vec2(s.geom.x + s.geom.w);
     }
     if ((s.flags & FLAG_STROKE) != 0u) extent += vec2(s.geom.z * 0.5);
+    if (s.kind == KIND_SHADOW) extent = s.geom.xy + 3.0 * s.geom.z;
     // A pixel and a half in local units, along each local axis.
     vec2 scales = vec2(length(s.m.xy), length(s.m.zw));
     extent += 1.5 / max(scales, vec2(1e-6));
@@ -49,4 +51,5 @@ void main() {
     v_color = s.color;
     v_user = s.lm.xy * p.x + s.lm.zw * p.y + s.lt;
     v_paint = s.paint;
+    v_clip = s.clip;
 }

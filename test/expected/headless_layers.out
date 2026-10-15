@@ -1,0 +1,29 @@
+clip_rect: ok
+clip_rect, fractional: ok
+clip_rect, turned: ok
+clip_circle: ok
+clip_rounded_rect: ok
+nested: ok
+clip_path: ok
+clip_path in a clip: ok
+a clip in a clip_path: ok
+a mesh clipped: ok
+after the block, none: ok
+text clipped: true
+overlap, without a layer 191,191,191,255; in a layer at half 128,128,128,255, alone 128,128,128,255
+screen: true outside true
+multiply: true outside true
+difference: true
+darken: true
+lighten: true
+overlay: true
+erase: true outside true
+keep: true outside true
+add: true
+blur: total kept true, edge true, outside true, middle true
+shadow: under true, beside true, none up-left true
+layer in a clip: ok
+stats: 3 passes, 1 clip
+box_shadow: ok
+box_shadow, rounded: ok
+multisampled star: ok
