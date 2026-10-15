@@ -263,6 +263,8 @@ var mesh_vertices: MeshVertex[>..<] = [];
 var mesh_indices: u32[>..<] = [];
 var batches: Batch[>..<] = [];
 var paints: PaintGPU[>..<] = [];
+var paint_hashes: u64[>..<] = [];          // by paint; the frame's paints are shared by a hash table
+var paint_table: i64[>..<] = [];           // open addressing: paint + 1, 0 empty
 var saved: Affine[>..<] = [];               // push()'s transforms
 
 // The ramp atlas: the gradients' ramps, a row each, kept from frame to
@@ -351,8 +353,11 @@ fn begin_into(target: gfx::Texture, clear: bool, clear_color: Color, samples: i6
     batches.resize(0);
     saved.resize(0);
     paints.resize(0);
+    paint_hashes.resize(0);
+    paint_table.resize(0);
     // Paint 0: the instance's color alone.
     paints.push(PaintGPU { image_mode: IMAGE_NONE, g1: float4 { 0.0, 0.0, 0.0, 1.0 }, .. });
+    paint_hashes.push(0);
 }
 
 // Draws everything recorded since begin.
@@ -669,10 +674,46 @@ fn paint_index(p: Paint, row: i64) -> u32 {
             gpu.g1.w = 0.0;
         }
     }
-    let n = paints.len;
-    if n > 1 && paints[n - 1] == gpu { return (n - 1) as u32; }
+    // The same record already in the frame, wherever it was added: a few
+    // paints taking turns make a few records, not one a shape.
+    let h = paint_hash(gpu);
+    if (paints.len + 1) * 2 > paint_table.len {
+        let n = max(paint_table.len * 2, 64);
+        paint_table.resize(0);
+        paint_table.resize(n, 0);
+        for other, i in paint_hashes { if i > 0 { place_paint(other, i); } }
+    }
+    let mask = paint_table.len - 1;
+    var i = (h as i64) & mask;
+    while paint_table[i] != 0 {
+        let at = paint_table[i] - 1;
+        if paint_hashes[at] == h && paints[at] == gpu { return at as u32; }
+        i = (i + 1) & mask;
+    }
     paints.push(gpu);
+    paint_hashes.push(h);
+    let n = paints.len - 1;
+    paint_table[i] = n + 1;
     n as u32
+}
+
+fn place_paint(h: u64, at: i64) {
+    let mask = paint_table.len - 1;
+    var i = (h as i64) & mask;
+    while paint_table[i] != 0 { i = (i + 1) & mask; }
+    paint_table[i] = at + 1;
+}
+
+fn paint_hash(p: PaintGPU) -> u64 {
+    fn v4(seed: u64, v: float4) -> u64 {
+        hash_combine(hash_combine(hash_combine(hash_combine(seed, hash(v.x)), hash(v.y)), hash(v.z)), hash(v.w))
+    }
+    var h = hash_combine(hash_combine(hash_combine(hash(p.kind), hash(p.spread)), hash(p.image_mode)), hash(p.flags));
+    h = v4(h, p.g0);
+    h = v4(h, p.g1);
+    h = v4(h, p.im);
+    h = v4(h, p.it);
+    v4(h, p.src)
 }
 
 // Records one shape: `local` places its local space under the current
@@ -700,7 +741,10 @@ fn paint_key(p: Paint) -> PaintKey {
         // No row for it: its middle color, tinted, stands in.
         if row < 0 { color *= to_float4(gradient_at(p.gradient, 0.5)); }
     }
-    PaintKey { color: color, paint: paint_index(p, row), blend: clamp(p.blend, 0, 3),
+    // A color alone, at an opacity: paint 0, the opacity in the color.
+    let plain = row < 0 && !has_image;
+    if plain { color.w *= p.opacity; }
+    PaintKey { color: color, paint: if plain { 0 } else { paint_index(p, row) }, blend: clamp(p.blend, 0, 3),
                texture: if has_image { img.texture } else { gfx::Texture { 0 } },
                sampler: if has_image { sampler } else { 2 } }
 }

@@ -69,7 +69,7 @@ and how to check it. Strike items out as they land.
    record time near `circles`' after the first frame; `pure_paint` and
    `headless_paint` unchanged.
 
-7. **Paint records are deduplicated against the last one only**
+7. ~~**Paint records are deduplicated against the last one only**~~ Done.
    (`paint_index`). Two paints taking turns make a record per shape:
    `shared_gradients` uploads 10,000 records. A `solid(c)` with an opacity
    also makes a record, though the instance's color could carry it.
@@ -77,6 +77,11 @@ and how to check it. Strike items out as they land.
    paint with no gradient, no image and local space to paint 0, with its
    opacity folded into the instance color's alpha. *Check:* `stats().paints`
    in the `shared` case of `headless_paint`, and `shared_gradients`' upload.
+   *Left over:* the upload halved, but recording a shape with a paint still
+   costs about three times a solid one (`shared_gradients` 5 µs a shape
+   against `circles`' 1.8, JIT). Passing `Paint` and `Gradient` by
+   reference gained nothing, twice, so copies are not it: profile the AOT
+   build before guessing again.
 
 8. **Every stroke is outlined and filled by the nonzero sweep.** That is
    what makes `chart` 83 ms and `dashed` 119 ms of record time plus 30 MB

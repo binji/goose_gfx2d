@@ -268,9 +268,11 @@ value with no allocation.
   its neighbors never bleed in, and mip level comes from the unwrapped
   coordinates so the seam doesn't drop to the smallest mip. The default
   mode, `IMAGE_MULTIPLY` with a white color, draws the image as it is.
-* **Paint records** are deduplicated against the last one added, so a loop
-  drawing many shapes with one paint uploads it once. A shape drawn with a
-  `Color` uses paint 0, "the instance's color alone", and needs no record.
+* **Paint records** are shared through a hash table of the frame's, so a
+  loop drawing many shapes with a few paints uploads each once, wherever
+  they come. A shape drawn with a `Color`, or with a paint that is a color
+  at an opacity, uses paint 0, "the instance's color alone" (the opacity
+  folded into the color), and needs no record.
 * **Blend modes on a paint** are the ones `gfx`'s fixed-function blending
   provides, with coverage and opacity folded into what the shader outputs:
   * `NORMAL` is `gfx::BLEND_PREMULTIPLIED`, with the shader outputting

@@ -228,6 +228,18 @@ fn main() {
     draw(black) { sharing(); };
     s = gfx2d::stats();
     print("the next frame: ", s.ramps, " ramps baked, the same pixels from the kept one ", px == first);
+    // Two paints taking turns are two records, not one a shape; a color at
+    // an opacity is no record, its opacity in the instance's color.
+    draw(black) {
+        let a = gfx2d::radial(0, 0, 10, white, black);
+        let b = gfx2d::linear(0, 0, 4, 0, white, black);
+        for i in 100 { gfx2d::circle(i, i, 3, if i % 2 == 0 { a } else { b }); }
+        for i in 10 { gfx2d::rect(i * 4, 100, 4, 4, gfx2d::with_opacity(gfx2d::solid(white), 0.5)); }
+        gfx2d::polygon([float2 { 50, 100 }, float2 { 60, 100 }, float2 { 60, 110 }], gfx2d::with_opacity(gfx2d::solid(white), 0.25));
+    };
+    s = gfx2d::stats();
+    print("by turns: ", s.paints, " paints for two taking turns and solids at an opacity, which draw ", at(2, 102),
+          " and ", at(59, 104));
     // The ramp atlas full: the gradients past the last row are drawn as
     // their middle color this frame, and the atlas starts over next frame
     // with them in it.
