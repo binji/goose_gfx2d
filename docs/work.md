@@ -129,7 +129,10 @@ and how to check it. Strike items out as they land.
     its composite to that. *Check:* `headless_layers` unchanged;
     `layers`, `blur` GPU times.
 
-12. **A blur at large sigma runs at full resolution.** *Change:* for sigma
+12. ~~**A blur at large sigma runs at full resolution.**~~ Done: from
+    sigma 5 at half resolution, from 10 at a quarter (`BLUR_DOWNSAMPLE_FROM`),
+    within 3 levels of 255 of the full-resolution result; `blur` GPU time
+    29 ms to about 10. *Change:* for sigma
     above a few pixels, blur at half or quarter resolution (a downsample
     pass, the two blur passes there, an upsample in the composite), with
     sigma scaled. *Check:* the `blur` case of `headless_layers` keeps its

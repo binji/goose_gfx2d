@@ -206,7 +206,7 @@ Goose program ──► gfx2d (Goose: shapes, paints, paths, text layout, passes
     distance functions (`sdf.glsl`), glyphs and box shadows.
   * `mesh`: tessellated paths.
   * `composite`: layers, including the blend modes that read the backdrop.
-  * `blur`: separable gaussian blur, and copies.
+  * `blur`: separable gaussian blur, copies, and box downsamples.
   * Shared code: paints (`paint.glsl`) and the clip chain
     (`clip.glsl`, `clip_coverage.glsl`).
 * **A frame is passes:**
@@ -228,6 +228,12 @@ Goose program ──► gfx2d (Goose: shapes, paints, paths, text layout, passes
     composited (gfx's scissor); a block that draws nothing leaves no
     passes. `BLEND_KEEP` composites the whole target, since it clears what
     the layer does not cover.
+  * A blur of sigma 5 and up (`BLUR_DOWNSAMPLE_FROM`) runs at half
+    resolution, of 10 and up at a quarter: the layer is box-downsampled
+    in a pass, blurred there with the sigma scaled (what the box and the
+    composite's linear upsample add is taken off it), and upsampled by the
+    composite. A blur and a shadow at the same resolution share the
+    downsample.
 * **Paths:** curves are flattened after the transform, then tessellated:
   * a convex contour becomes a fan with an exact one-pixel fringe;
   * anything else is cut into bands at vertices and crossings, with spans

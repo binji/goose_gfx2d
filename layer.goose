@@ -125,22 +125,81 @@ struct LayerDesc {
     shadow_blur: f32 = 0.0,                     // the shadow's sigma, pixels
 }
 
-// `src` blurred by sigma both ways, into a texture of the pool: within
-// `b`, what was drawn, grown by the blur's reach (3 sigma, and a pixel).
-// The first pass reads 3 sigma across and writes what the second reads,
-// 3 sigma further up and down; outside what either writes the pool's
-// textures hold whatever they did.
-fn blurred(src: gfx::Texture, sigma: f32, b: Bounds) -> gfx::Texture {
-    let across = pooled(state.width, state.height, gfx::RGBA8, 1);
-    let out = pooled(state.width, state.height, gfx::RGBA8, 1);
-    let reach = 3.0 * sigma + 1.0;
-    blur_pass(src, across, float2 { 1.0, 0.0 }, sigma, scissor_of(inflate(b, float2 { reach, 2.0 * reach })));
-    blur_pass(across, out, float2 { 0.0, 1.0 }, sigma, scissor_of(inflate(b, float2 { reach, reach })));
+// A blur of sigma at least this (pixels) runs at half resolution, and of
+// twice it at a quarter: the layer is box-downsampled, blurred there with
+// the sigma scaled, and upsampled by the composite's linear sampler. The
+// blur's cost falls by the square of the factor; what the box and the
+// upsample add to the blur is taken off the sigma, so the result keeps
+// the gaussian's width. A test may raise it to compare the two.
+var BLUR_DOWNSAMPLE_FROM: f32 = 5.0;
+
+// How a blur of some sigma runs: at 1 / factor of the target's resolution,
+// with `sigma` there, reaching `reach` texels there past what was drawn
+// (3 sigma and a texel; at a lower resolution a texel more each for the
+// rounding to texels and the upsample's interpolation).
+struct BlurPlan { factor: i64, sigma: f32, reach: f32 }
+fn blur_plan(sigma: f32) -> BlurPlan {
+    var f = 1;
+    if sigma >= BLUR_DOWNSAMPLE_FROM { f = 2; }
+    if sigma >= 2.0 * BLUR_DOWNSAMPLE_FROM { f = 4; }
+    if f == 1 { return BlurPlan { 1, sigma, 3.0 * sigma + 1.0 }; }
+    // The box over f texels has variance (f^2 - 1) / 12, the linear
+    // upsample's tent f^2 / 6: the gaussian supplies the rest.
+    let added = (3.0 * f * f - 1.0) / 12.0;
+    let low = sqrt(max(sigma * sigma - added, 1.0)) / f;
+    BlurPlan { f, low, ceil((3.0 * sigma + 1.0) / f) + 2.0 }
+}
+// How far past what was drawn (target pixels) the layer's texture must be
+// cleared for the blur's reads to see nothing but the layer: the first
+// pass reads its reach beyond what it writes, which is the reach beyond
+// what the second reads; a downsample reads its taps' box further.
+fn clear_reach(p: BlurPlan) -> f32 {
+    if p.factor == 1 { 2.0 * p.reach } else { p.factor * (2.0 * p.reach + 3.0) }
+}
+fn low_size(factor: i64) -> i64, i64 {
+    return (state.width + factor - 1) / factor, (state.height + factor - 1) / factor;
+}
+fn low_bounds(b: Bounds, factor: i64) -> Bounds {
+    let k = 1.0 / factor;
+    Bounds { b.lo * k, b.hi * k }
+}
+
+// `src` (the target's size) downsampled by `factor` into a texture of the
+// pool, over `b` (what was drawn) grown by what a blur of `reach` there
+// reads.
+fn downsampled(src: gfx::Texture, factor: i64, reach: f32, b: Bounds) -> gfx::Texture {
+    let w, h = low_size(factor);
+    let down = pooled(w, h, gfx::RGBA8, 1);
+    let by = 2.0 * reach + 1.0;
+    blur_pass(src, down, float2_0, 0.0, scissor_in(inflate(low_bounds(b, factor), float2 { by, by }), w, h),
+              factor);
+    down
+}
+
+// `src` blurred both ways as `p` plans, into a texture of the pool, the
+// target's size or the plan's fraction of it: within `b`, what was drawn,
+// grown by the blur's reach. At a lower resolution `down` is `src` already
+// downsampled by the plan's factor, and is what is blurred. The first pass
+// reads the reach across and writes what the second reads, the reach
+// further up and down; outside what either writes the pool's textures hold
+// whatever they did.
+fn blurred(src: gfx::Texture, p: BlurPlan, b: Bounds, down: gfx::Texture) -> gfx::Texture {
+    let w, h = low_size(p.factor);
+    let bl = low_bounds(b, p.factor);
+    let from = if p.factor == 1 { src } else { down };
+    let across = pooled(w, h, gfx::RGBA8, 1);
+    let out = pooled(w, h, gfx::RGBA8, 1);
+    let reach = p.reach;
+    blur_pass(from, across, float2 { 1.0, 0.0 }, p.sigma,
+              scissor_in(inflate(bl, float2 { reach, 2.0 * reach }), w, h));
+    blur_pass(across, out, float2 { 0.0, 1.0 }, p.sigma, scissor_in(inflate(bl, float2 { reach, reach }), w, h));
     out
 }
 
 // A composite, as a batch: its index in composites.
 fn composite(layer: gfx::Texture, backdrop: gfx::Texture, u: CompositeUniforms, scissor: Scissor) -> i64 {
+    var u = u;
+    u.size = float2 { state.width, state.height };
     composites.push(Composite { layer: layer, backdrop: backdrop, u: u, scissor: scissor });
     let pipeline = if u.blend <= BLEND_REPLACE { u.blend as i32 } else { BLEND_REPLACE as i32 };
     batches.push(Batch { kind: BATCH_COMPOSITE, first: composites.len - 1, count: 1, blend: pipeline,
@@ -172,8 +231,10 @@ fn layer<F>(d: LayerDesc) {
     close_pass();
     let drawn = layer_bounds.pop();
     let shadowed = d.shadow.a > 0.0;
-    let reach = 3.0 * max(d.blur, if shadowed { d.shadow_blur } else { 0.0 }) + 1.0;
-    let cleared = scissor_of(inflate(drawn, float2 { 2.0 * reach, 2.0 * reach }));
+    let bp = blur_plan(d.blur);
+    let sp = blur_plan(if shadowed { d.shadow_blur } else { 0.0 });
+    let reach = max(clear_reach(bp), clear_reach(sp));
+    let cleared = scissor_of(inflate(drawn, float2 { reach, reach }));
     if is_empty(drawn) || is_nothing(cleared) {
         // Nothing drawn, or nothing in the target: the layer's pass is left
         // out, and nothing is composited.
@@ -191,11 +252,22 @@ fn layer<F>(d: LayerDesc) {
         composites[clearing].scissor = cleared;
     }
     let content_bounds = inflate(drawn, float2 { 3.0 * d.blur + 1.0, 3.0 * d.blur + 1.0 });
-    let content = if d.blur > 0.0 { blurred(tex, d.blur, drawn) } else { tex };
+    // A blur at a lower resolution starts from the layer downsampled: once
+    // for both the blur and the shadow when they run at the same one.
+    var down = gfx::Texture { 0 };
+    var shadow_down = gfx::Texture { 0 };
+    if bp.factor > 1 {
+        let r = if shadowed && sp.factor == bp.factor { max(bp.reach, sp.reach) } else { bp.reach };
+        down = downsampled(tex, bp.factor, r, drawn);
+    }
+    if shadowed && sp.factor > 1 {
+        shadow_down = if sp.factor == bp.factor { down } else { downsampled(tex, sp.factor, sp.reach, drawn) };
+    }
+    let content = if d.blur > 0.0 { blurred(tex, bp, drawn, down) } else { tex };
     var shadow = gfx::Texture { 0 };
     var shadow_bounds = Bounds { .. };
     if shadowed {
-        shadow = if d.shadow_blur > 0.0 { blurred(tex, d.shadow_blur, drawn) } else { tex };
+        shadow = if d.shadow_blur > 0.0 { blurred(tex, sp, drawn, shadow_down) } else { tex };
         shadow_bounds = offset(inflate(drawn, float2 { 3.0 * d.shadow_blur + 1.0, 3.0 * d.shadow_blur + 1.0 }),
                                d.shadow_offset);
     }
@@ -206,7 +278,8 @@ fn layer<F>(d: LayerDesc) {
             composite(shadow, gfx::Texture { 0 },
                       CompositeUniforms { tint: to_float4(d.shadow), offset: d.shadow_offset,
                                           opacity: d.opacity, blend: BLEND_NORMAL as u32, shadow: 1,
-                                          clip: clip }, sc);
+                                          clip: clip, scale: if d.shadow_blur > 0.0 { sp.factor } else { 1.0 },
+                                          .. }, sc);
         }
     }
     // KEEP changes the target wherever the layer is not, so it needs all of it.
@@ -222,7 +295,8 @@ fn layer<F>(d: LayerDesc) {
             open_pass(back.target, back.resolve, back.samples, false);
         }
         composite(content, backdrop, CompositeUniforms { opacity: d.opacity, blend: clamp(d.blend, 0, 15) as u32,
-                                                         clip: clip, .. }, sc);
+                                                         clip: clip, scale: if d.blur > 0.0 { bp.factor } else { 1.0 },
+                                                         .. }, sc);
     }
     // What this layer puts on the target counts as drawn by the one around it.
     if in_layer() {

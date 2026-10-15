@@ -402,7 +402,9 @@ fn blend_layers() {
     }
 }
 
-// One blurred layer and one drop shadow, the whole target: four blur passes.
+// One blurred layer and one drop shadow, the whole target: a blur at a
+// quarter of the resolution and one at half, four blur passes and two
+// downsamples.
 fn blur() {
     seed(19);
     gfx2d::layer(gfx2d::LayerDesc { blur: 8, shadow: gfx2d::rgba(0x000000, 0.5),

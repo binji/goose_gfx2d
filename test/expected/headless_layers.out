@@ -31,5 +31,7 @@ multisampled star: ok
 empty layer: 1 pass, one with content 3
 blurred in a layer, whole: ok
 a blurred shadow, whole: ok
+blur at half and quarter resolution: within 2 of 255 of the full one, totals kept true
+a blur and a shadow at a quarter: 8 passes, one downsample for both
 nested shadow at half: true true
 pool: 1 of another size, 1 a frame later, 0 after two; the target's kept true, 0 after 8 frames unused

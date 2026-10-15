@@ -1,9 +1,11 @@
 // A layer composited onto the target it was opened over: its texture
-// (premultiplied, the target's size) at an offset, times opacity, or for a
-// shadow its alpha alone in the tint's color; under the clip the layer was
-// opened in; blended by a fixed-function mode (blend_out), or by one of the
-// modes that need what is under it (backdrop, a copy of the target), which
-// write the result whole.
+// (premultiplied, the target's size, or `scale` times smaller each way
+// when it was blurred at a lower resolution, and then upsampled here by
+// the linear sampler) at an offset, times opacity, or for a shadow its
+// alpha alone in the tint's color; under the clip the layer was opened in;
+// blended by a fixed-function mode (blend_out), or by one of the modes
+// that need what is under it (backdrop, a copy of the target), which write
+// the result whole.
 #include "paint.glsl"
 #include "sdf.glsl"
 #include "clip.glsl"
@@ -15,11 +17,14 @@ layout(std430, set = 2, binding = 3) readonly buffer Clips { Clip clips[]; };
 layout(set = 3, binding = 0) uniform Composite {
     vec4 tint;          // a shadow's color, straight
     vec2 offset;        // where the layer is drawn, from where it was
+    vec2 size;          // the layer's, in target pixels
     float opacity;
     uint blend;         // BLEND_*
     uint shadow;        // 1: draw the alpha in the tint
     uint clip;
-    vec2 pad;
+    float scale;        // target pixels a texel of the layer's texture
+    float pad0;
+    vec2 pad1;
 };
 
 layout(location = 0) out vec4 result;
@@ -67,12 +72,11 @@ vec3 blend_fn(uint mode, vec3 b, vec3 s) {
 }
 
 void main() {
-    vec2 size = vec2(textureSize(layer, 0));
-    vec2 uv = (gl_FragCoord.xy - offset) / size;
-    vec4 s = textureLod(layer, uv, 0.0);
+    vec2 p = gl_FragCoord.xy - offset;      // where in the layer, target pixels
+    vec4 s = textureLod(layer, p / (scale * vec2(textureSize(layer, 0))), 0.0);
     // Past the layer's edge there is nothing, not its edge pixels again
     // (the sampler clamps): a shadow offset inward from the target's edge.
-    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) s = vec4(0.0);
+    if (any(lessThan(p, vec2(0.0))) || any(greaterThan(p, size))) s = vec4(0.0);
     if (shadow != 0u) s = vec4(tint.rgb, 1.0) * tint.a * s.a;
     s *= opacity * clip_coverage(clip, gl_FragCoord.xy);
     if (blend < BLEND_SCREEN) {

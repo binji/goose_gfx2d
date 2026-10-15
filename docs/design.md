@@ -609,7 +609,12 @@ and ends with it.
     (destination-in), need what's under the layer. The target is copied
     into a backdrop texture by a copy pass, and the shader blends the two
     and writes the result.
-  * `blur` (a gaussian's sigma) blurs the layer with two separable passes.
+  * `blur` (a gaussian's sigma) blurs the layer with two separable passes;
+    from sigma 5 at half resolution and from 10 at a quarter, after a box
+    downsample pass, with the sigma scaled and the box's and the upsample's
+    own blur taken off it (their variances: (f² − 1) / 12 and f² / 6 for
+    a factor f), so the result keeps the gaussian's width within a few
+    levels of 255.
   * A drop shadow composites the layer's alpha, blurred by `shadow_blur`,
     in `shadow`'s color at `shadow_offset`, before the layer itself.
   * A paint whose blend is one of the layer-only modes is a misuse.
@@ -631,9 +636,10 @@ and ends with it.
   * A draw pass draws a run of batches into a target, multisampled and
     resolved or not.
   * A blur pass draws a texture blurred one way, or copied, into another.
-  * A layer adds 2 passes, a backdrop blend mode 2 more, each blur 2, and
-    a path clip 2. A draw pass with nothing to draw that clears nothing
-    is skipped.
+  * A layer adds 2 passes, a backdrop blend mode 2 more, each blur 2 (and
+    one downsample at a lower resolution, shared by a blur and a shadow at
+    the same one), and a path clip 2. A draw pass with nothing to draw
+    that clears nothing is skipped.
   * A layer's passes touch only the pixels its block drew (the bounds of
     its instances' quads and its meshes' vertices, and of the layers
     inside it), grown by the reach of its blur and its shadow: the clear

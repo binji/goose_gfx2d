@@ -204,6 +204,34 @@ fn main() {
     var dark = 0.0;
     for i in W * W { dark += (255 - px[i * 4]) / 255.0; }
     check_area("a blurred shadow, whole", dark, 400, 5);
+    // A blur of sigma 5 and up runs at half resolution, 10 and up at a
+    // quarter: the result is the full-resolution one's within a few
+    // levels, and its total is kept.
+    fn blurred_rect(sigma: f64) -> u8[>..] {
+        draw(gfx2d::BLACK) { gfx2d::layer(gfx2d::LayerDesc { blur: sigma as f32 }) { gfx2d::rect(40, 40, 30, 30, white); }; };
+        copy(px)
+    }
+    var worst = 0;
+    var totals_kept = true;
+    for sigma in [6.0, 12.0] {
+        gfx2d::BLUR_DOWNSAMPLE_FROM = 1e9;
+        let full = blurred_rect(sigma);
+        gfx2d::BLUR_DOWNSAMPLE_FROM = 5.0;
+        let low = blurred_rect(sigma);
+        var total = 0.0;
+        for i in W * W {
+            let d = abs((full[i * 4] as i64) - (low[i * 4] as i64));
+            if d > worst { worst = d; }
+            total += low[i * 4] / 255.0;
+        }
+        if abs(total - 900) > 5 { totals_kept = false; }
+    }
+    print("blur at half and quarter resolution: within ", worst, " of 255 of the full one, totals kept ", totals_kept);
+    draw(gfx2d::BLACK) {
+        gfx2d::layer(gfx2d::LayerDesc { blur: 12, shadow: gfx2d::rgba(0x000000, 1.0), shadow_offset: float2 { 4, 4 },
+                                        shadow_blur: 14 }) { gfx2d::rect(40, 40, 30, 30, white); };
+    };
+    print("a blur and a shadow at a quarter: ", gfx2d::stats().passes, " passes, one downsample for both");
     // Nested: the inner layer's shadow counts as drawn by the outer one.
     draw(gfx2d::WHITE) {
         gfx2d::layer(0.5) {

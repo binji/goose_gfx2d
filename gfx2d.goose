@@ -122,9 +122,9 @@ let CLIP_SIZE = 64;
 // The shaders' uniform blocks, rounded to 16 bytes as std140 does.
 struct FrameUniforms { view: float4, base: u32, pad 12 }
 struct BlendUniforms { blend: u32, clip: u32, pad 8 }     // clip: a mesh batch's
-struct CompositeUniforms { tint: float4, offset: float2, opacity: f32, blend: u32, shadow: u32,
-                           clip: u32, pad 8 }
-struct BlurUniforms { dir: float2, sigma: f32, pad 4 }
+struct CompositeUniforms { tint: float4, offset: float2, size: float2, opacity: f32, blend: u32, shadow: u32,
+                           clip: u32, scale: f32 = 1.0, pad 12 }    // size: the layer's, in target pixels; scale: target pixels a texel of it
+struct BlurUniforms { dir: float2, sigma: f32, scale: f32 = 1.0 }   // scale: source texels a target texel, for a downsample
 
 // How a line or an arc ends.
 let CAP_BUTT = 0;       // at the end point
@@ -239,12 +239,14 @@ fn union(b: Bounds, c: Bounds) -> Bounds {
     Bounds { float2 { min(b.lo.x, c.lo.x), min(b.lo.y, c.lo.y) }, float2 { max(b.hi.x, c.hi.x), max(b.hi.y, c.hi.y) } }
 }
 // The bounds as whole pixels within the target; w 0 if none are.
-fn scissor_of(b: Bounds) -> Scissor {
+fn scissor_of(b: Bounds) -> Scissor { scissor_in(b, state.width, state.height) }
+// The same within a texture of w by h.
+fn scissor_in(b: Bounds, w: i64, h: i64) -> Scissor {
     if is_empty(b) { return Scissor { 0, 0, 0, 0 }; }
-    let x0 = clamp(floor(b.lo.x) as i64, 0, state.width);
-    let y0 = clamp(floor(b.lo.y) as i64, 0, state.height);
-    let x1 = clamp(ceil(b.hi.x) as i64, 0, state.width);
-    let y1 = clamp(ceil(b.hi.y) as i64, 0, state.height);
+    let x0 = clamp(floor(b.lo.x) as i64, 0, w);
+    let y0 = clamp(floor(b.lo.y) as i64, 0, h);
+    let x1 = clamp(ceil(b.hi.x) as i64, 0, w);
+    let y1 = clamp(ceil(b.hi.y) as i64, 0, h);
     if x1 <= x0 || y1 <= y0 { return Scissor { 0, 0, 0, 0 }; }
     Scissor { x0, y0, x1 - x0, y1 - y0 }
 }
@@ -430,11 +432,13 @@ fn open_pass(target: gfx::Texture, resolve: gfx::Texture, samples: i32, clear: b
 }
 
 // `src` blurred along dir (a texel, (1, 0) or (0, 1)) by sigma, or copied
-// for 0, into `target`, in a pass of its own between the draw passes.
+// for 0, into `target`, in a pass of its own between the draw passes. A
+// copy into a target `scale` times smaller each way (2 or 4) averages the
+// source's texels into each of the target's.
 fn blur_pass(src: gfx::Texture, target: gfx::Texture, dir: float2, sigma: f32,
-             scissor: Scissor = Scissor { .. }) {
+             scissor: Scissor = Scissor { .. }, scale: f32 = 1.0) {
     passes.push(Pass { kind: PASS_BLUR, target: target, samples: 1, src: src,
-                       blur: BlurUniforms { dir: dir, sigma: sigma }, width: state.width,
+                       blur: BlurUniforms { dir: dir, sigma: sigma, scale: scale }, width: state.width,
                        height: state.height, first_batch: batches.len, end_batch: batches.len,
                        scissor: scissor, .. });
 }

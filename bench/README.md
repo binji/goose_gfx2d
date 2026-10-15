@@ -70,7 +70,7 @@ where it shows:
 | `layers` | layers: a pass, a pass back and a composite each |
 | `small_layers` | small layers with blur and shadow: passes and composites scissored to their contents |
 | `blend_layers` | blend modes needing the backdrop: a copy more each |
-| `blur` | separable gaussian blur passes over the whole target |
+| `blur` | separable gaussian blur passes over the whole target, at a quarter and a half of its resolution |
 | `box_shadows` | analytic blurred rounded rects |
 | `ui_scene` | a mix, as an application's frame might be |
 | `ui_scene_msaa` | the same into a 4x multisampled target |
