@@ -43,7 +43,7 @@ fn main() {
 
 The examples in `examples/` show each part: `shapes`, `paint`, `paths`,
 `text`, `layers`, `pixel_art` and `goose_logo` (the Goose logo from its
-SVG, animated by warping its path, with a rainbow shine). Each takes
+SVG, animated by warping its path, with an iridescent gloss). Each takes
 `-- --frames N --screenshot file.png`.
 
 ## Reference

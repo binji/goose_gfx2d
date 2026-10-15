@@ -1,7 +1,7 @@
 // The Goose logo, from its SVG: the paths' data parsed by svg_path, the
 // goose's speed lines rippling and its head bobbing by warping the path a
-// little every frame, and now and then a rainbow shine sweeping across it,
-// with a glow; and its name centered below it.
+// little every frame, its name centered below it, and now and then a gloss
+// like iridescent metal sweeping across both, with a glow.
 //
 // goose_logo.svg is the Goose repository's vscode/fileicons/goose-light-icon.svg
 // (a potrace trace, Apache License 2.0, as Goose).
@@ -56,20 +56,30 @@ fn animate(logo: gfx2d::Path&, t: f64) {
 let SHINE_EVERY = 4.0;      // seconds
 let SHINE_FOR = 0.9;
 
-// The rainbow band across the logo at u, from 0 (before its left end) to 1
-// (past its right): a gradient across the band, transparent at its edges,
-// in OKLab so the colors between stay bright.
-fn rainbow(u: f64) -> gfx2d::Paint {
-    let c = -300 + u * 2300;
+// The gloss at u, from 0 (before the left of the span x0 to x1) to 1 (past
+// its right), in the window's pixels (SPACE_SCREEN), so one paint crosses
+// the logo, under its transform, and the text alike: a narrow white
+// highlight, with a film's thin tints either side (violet and teal ahead,
+// gold and pink behind), fading out at the band's edges, mixed in OKLab so
+// the tints stay clean.
+fn gloss(u: f64, x0: f64, x1: f64, y: f64) -> gfx2d::Paint {
+    let w = (x1 - x0) * 0.16;            // half the band's width
+    let c = x0 - w * 2 + u * (x1 - x0 + w * 4);
     let d = float2 { 0.89, 0.45 };      // across the band, which leans
-    let w = 230.0;
-    var stops: gfx2d::Stop[>..] = [];
-    stops.push(gfx2d::stop(0.0, gfx2d::with_alpha(gfx2d::hsv(0.0, 0.85, 1.0), 0)));
-    for k in 7 { stops.push(gfx2d::stop(0.15 + k * 0.7 / 6, gfx2d::hsv(k / 7.0, 0.85, 1.0))); }
-    stops.push(gfx2d::stop(1.0, gfx2d::with_alpha(gfx2d::hsv(6 / 7.0, 0.85, 1.0), 0)));
-    var g = gfx2d::linear_gradient(c - d.x * w, 384 - d.y * w, c + d.x * w, 384 + d.y * w, stops);
+    var g = gfx2d::linear_gradient(c - d.x * w, y - d.y * w, c + d.x * w, y + d.y * w, [
+        gfx2d::stop(0.00, gfx2d::rgba(0x7A6CFF, 0.0)),
+        gfx2d::stop(0.22, gfx2d::rgba(0x7A6CFF, 0.30)),
+        gfx2d::stop(0.36, gfx2d::rgba(0x3FD5D0, 0.45)),
+        gfx2d::stop(0.47, gfx2d::rgba(0xFFFFFF, 0.95)),
+        gfx2d::stop(0.53, gfx2d::rgba(0xFFFFFF, 0.95)),
+        gfx2d::stop(0.64, gfx2d::rgba(0xF5C77A, 0.45)),
+        gfx2d::stop(0.78, gfx2d::rgba(0xFF7FC8, 0.30)),
+        gfx2d::stop(1.00, gfx2d::rgba(0xFF7FC8, 0.0)),
+    ]);
     g.space = gfx2d::INTERPOLATE_OKLAB;
-    gfx2d::paint(g)
+    var p = gfx2d::paint(g);
+    p.space = gfx2d::SPACE_SCREEN;
+    p
 }
 
 fn main() {
@@ -114,29 +124,31 @@ fn main() {
         let fit = gfx2d::fit(bounds, gfx2d::rect_of(60, 40, size.x - 120, size.y - 80 - name_size * 1.4),
                              gfx2d::FIT_CONTAIN);
         let placed = gfx2d::transformed_bounds(fit, bounds);
+        let cream = gfx2d::rgb(0xF5F1E8);
+        let name_style = gfx2d::TextStyle { size: name_size as f32, align: gfx2d::ALIGN_CENTER };
+        let name_y = placed.y + placed.h + name_size * 0.15;
+        let shine = gloss(u, placed.x, placed.x + placed.w, size.y * 0.5);
         gfx2d::frame(gfx2d::rgb(0x101018)) {
             gfx2d::rect(0, 0, size.x, size.y, gfx2d::radial(size.x / 2, size.y / 2, size.x * 0.6,
                                                             gfx2d::rgb(0x23233A), gfx2d::rgb(0x101018)));
-            gfx2d::transform(fit) {
-                // The goose, with a soft shadow below it.
-                gfx2d::layer(gfx2d::LayerDesc { shadow: gfx2d::rgba(0x000000, 0.6),
-                                                shadow_offset: float2 { 0, 10 }, shadow_blur: 12 }) {
-                    gfx2d::fill(moving, gfx2d::rgb(0xF5F1E8));
-                };
-                if shining {
-                    // The band on the goose, and a glow of it, blurred and
-                    // added, spilling past its edges.
-                    let band = gfx2d::with_opacity(rainbow(u), strength);
-                    gfx2d::fill(moving, band);
-                    gfx2d::layer(gfx2d::LayerDesc { opacity: (0.8 * strength) as f32,
-                                                    blend: gfx2d::BLEND_ADD as i32, blur: 10 }) {
-                        gfx2d::fill(moving, rainbow(u));
-                    };
-                }
+            // The goose, with a soft shadow below it, and its name.
+            gfx2d::layer(gfx2d::LayerDesc { shadow: gfx2d::rgba(0x000000, 0.6),
+                                            shadow_offset: float2 { 0, 10 }, shadow_blur: 12 }) {
+                gfx2d::transform(fit) { gfx2d::fill(moving, cream); };
+                gfx2d::text(size.x / 2, name_y, "Goose", name_style, cream);
             };
-            gfx2d::text(size.x / 2, placed.y + placed.h + name_size * 0.15, "Goose",
-                        gfx2d::TextStyle { size: name_size as f32, align: gfx2d::ALIGN_CENTER },
-                        gfx2d::rgb(0xF5F1E8));
+            if shining {
+                // The gloss on both, and a glow of it, blurred and added,
+                // spilling past their edges.
+                let band = gfx2d::with_opacity(shine, strength);
+                gfx2d::transform(fit) { gfx2d::fill(moving, band); };
+                gfx2d::text(size.x / 2, name_y, "Goose", name_style, band);
+                gfx2d::layer(gfx2d::LayerDesc { opacity: (0.6 * strength) as f32,
+                                                blend: gfx2d::BLEND_ADD, blur: 8 }) {
+                    gfx2d::transform(fit) { gfx2d::fill(moving, shine); };
+                    gfx2d::text(size.x / 2, name_y, "Goose", name_style, shine);
+                };
+            }
         };
         drawn++;
     }
