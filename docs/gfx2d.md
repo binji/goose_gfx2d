@@ -315,6 +315,9 @@ python bench/run_bench.py --goose …                       # bench/results.md
 
 ## Follow-up work
 
+[future_work.md](future_work.md) lists features to add, as changes to
+make. Besides those:
+
 * **Batching:**
   * shapes and paths in one pipeline, so they don't break each other's
     batches (the UI scene makes 120 draw calls);

@@ -66,7 +66,7 @@ top) that puts the layers, paints, paths and text to work together.
 | `color.goose`, `transform.goose`, `paint.goose`, `path.goose` | colors; affine transforms and rectangles; paints and gradient ramps; paths, tessellation and stroking: plain Goose, no GPU |
 | `text.goose` | fonts, the glyph atlas, layout and drawing text |
 | `layer.goose` | clips and layers, as scoped blocks |
-| `docs/` | `gfx2d.md`, the reference; `design.md`, the plan and its reasoning |
+| `docs/` | `gfx2d.md`, the reference; `design.md`, the plan and its reasoning; `future_work.md`, what is next |
 | `gfx2d.build` | the package's sidecar: the CMake target to build, and that its functions run on the main thread only |
 | `CMakeLists.txt` | builds the text layer (stb_truetype) as a static library, carried by the target `goose_gfx2d_package` |
 | `src/shaders/` | the GLSL that `gfx2d.goose` embeds with `embed_shader` |
