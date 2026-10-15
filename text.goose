@@ -482,7 +482,7 @@ fn resolve_glyph(f: Font, cp: u32) -> Font, i32 {
         return Font { (v >> 32) as u32 }, (v & 0xFFFFFFFF) as i32;
     }
     let gf, g = resolve_glyph_slow(f, cp);
-    cache_insert(cmap_keys, cmap_vals, cmap_count, key, ((gf.id as u64) << 32) | (g as u32 as u64));
+    cache_insert(cmap_keys, cmap_vals, cmap_count, key, ((gf.id as u64) << 32) | (g as u32));
     return gf, g;
 }
 fn resolve_glyph_slow(f: Font, cp: u32) -> Font, i32 {
@@ -511,7 +511,7 @@ fn kern_of(f: Font, g1: i32, g2: i32) -> i32 {
     let found = cache_find(kern_keys, key);
     if found >= 0 { return (kern_vals[found] as u32) as! i32; }
     let k = kern(f, g1, g2);
-    cache_insert(kern_keys, kern_vals, kern_count, key, k as u32 as u64);
+    cache_insert(kern_keys, kern_vals, kern_count, key, k as u32);
     k
 }
 

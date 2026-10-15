@@ -63,5 +63,6 @@ diamond grid: ok
 diamond grid, even-odd: ok
 diamond grid, fringe: ok
 diamond grid, even-odd fringe: ok
+dash offset wraps: true true, and moves the dashes true
 stripes: ok
 stripes, fringe: ok

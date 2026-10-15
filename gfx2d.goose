@@ -787,7 +787,7 @@ fn paint_index(p: const Paint&, row: i64) -> u32 {
         ..
     };
     if p.gradient.kind != GRADIENT_NONE {
-        if row < 0 { gpu.kind = GRADIENT_NONE as u32; }
+        if row < 0 { gpu.kind = GRADIENT_NONE; }
         gpu.g1.z = max(row, 0);
         if p.gradient.kind == GRADIENT_LINEAR {
             gpu.g0 = float4 { p.gradient.p0.x, p.gradient.p0.y, p.gradient.p1.x, p.gradient.p1.y };

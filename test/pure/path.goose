@@ -402,6 +402,18 @@ fn main() {
         gfx2d::line_to(bars, x + 50, 100);
         gfx2d::close(bars);
     }
+    // A dash offset wraps whichever way it goes: -5 into a pattern of 30
+    // is 25 into it, and a dash moved by a whole pattern is where it was.
+    var dashed_line = gfx2d::Path {};
+    gfx2d::move_to(dashed_line, 0, 0);
+    gfx2d::line_to(dashed_line, 100, 0);
+    fn dash_ink(offset: f64) -> f64 {
+        let m = gfx2d::tessellate_stroke(dashed_line, gfx2d::Stroke { width: 4, dash: [20, 10], dash_offset: offset },
+                                         1, false, false);
+        covered(m.vertices, m.indices)
+    }
+    print("dash offset wraps: ", abs(dash_ink(-5) - dash_ink(25)) < 0.01, " ", abs(dash_ink(-35) - dash_ink(25)) < 0.01,
+          ", and moves the dashes ", abs(dash_ink(-5) - dash_ink(0)) > 1);
     let bar_edges = 50 * (4 + 2 * sqrt(50.0 * 50 + 100 * 100));
     check("stripes", fill_area(bars, gfx2d::NONZERO, 0), 50 * 200, 0.5);
     check("stripes, fringe", fill_area(bars, gfx2d::NONZERO, 1) - 50 * 200, bar_edges * 0.125, bar_edges * 0.03);

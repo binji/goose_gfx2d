@@ -57,7 +57,7 @@ struct Stroke {
     cap: i32 = 0,                   // CAP_BUTT
     miter_limit: f64 = 4.0,         // a miter longer than this many half widths is beveled
     dash: f64[..8] = [],            // on, off, on, off, ... lengths; empty: solid
-    dash_offset: f64 = 0.0,         // how far into the pattern the path starts
+    dash_offset: f64 = 0.0,         // how far into the pattern the path starts; any sign, wrapped
     pixels: bool = false,           // width and dashes in pixels, whatever the transform
 }
 
@@ -1526,7 +1526,9 @@ fn dash_contours(pts: const float2[:], contours: const Contour[:], pattern: cons
         // Where in the pattern the contour starts.
         var k = 0;
         var left = pattern[0];
+        // The offset wrapped into the pattern, whichever way it goes.
         var phase = offset % total;
+        if phase < 0.0 { phase += total; }
         while phase > 0.0 {
             if phase >= left {
                 phase -= left;
