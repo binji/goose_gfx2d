@@ -43,8 +43,12 @@ fn main() {
   happens and aborts at `end()`, as `gfx` does.
 
 The examples in `examples/` show each part: `shapes`, `paint`, `paths`,
-`text`, `layers`, `pixel_art` and `goose_logo` (the Goose logo from its
-SVG, animated by warping its path, with an iridescent gloss). Each takes
+`text`, `layers`, `pixel_art`, `goose_logo` (the Goose logo from its
+SVG, animated by warping its path, with an iridescent gloss) and
+`breakout`, a small game whose blocks sink and whose rows come in at the
+top: a base scale fitting the window, a blurred additive glow, a scene
+blurred behind its pause card, a retained star mesh for the shards, a
+dashed danger line, and outlined text. Each takes
 `-- --frames N --screenshot file.png`.
 
 ## Reference

@@ -53,8 +53,10 @@ fn main() {
 ```
 
 `examples/` has a program for each part: `shapes`, `paint`, `paths`,
-`text`, `layers` and `pixel_art`, and `goose_logo`, the Goose logo read
-from its SVG and animated (the picture above is one of its frames).
+`text`, `layers` and `pixel_art`; `goose_logo`, the Goose logo read
+from its SVG and animated (the picture above is one of its frames); and
+`breakout`, a small game (the blocks sink, and new rows come in at the
+top) that puts the layers, paints, paths and text to work together.
 
 ## Layout
 
