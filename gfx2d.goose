@@ -218,7 +218,48 @@ struct Batch { kind: i64, first: i64, count: i64, blend: i32, texture: gfx::Text
 
 // A layer's compositing: its texture (or its blur's) onto the target, with
 // a copy of what was under it where its blend mode needs one.
-struct Composite { layer: gfx::Texture, backdrop: gfx::Texture, u: CompositeUniforms }
+struct Composite { layer: gfx::Texture, backdrop: gfx::Texture, u: CompositeUniforms,
+                   scissor: Scissor }
+
+// The pixels a draw is limited to: a layer's passes and composites to what
+// the layer drew, not the whole target. w 0: all of it.
+struct Scissor { x: i64 = 0, y: i64 = 0, w: i64 = 0, h: i64 = 0 }
+
+// The bounds, in pixels, of what a layer's block has drawn: empty while
+// lo > hi.
+struct Bounds { lo: float2 = float2 { 1e30, 1e30 }, hi: float2 = float2 { -1e30, -1e30 } }
+fn is_empty(b: Bounds) -> bool { b.lo.x > b.hi.x || b.lo.y > b.hi.y }
+fn extend(b: Bounds&, p: float2) {
+    b.lo = float2 { min(b.lo.x, p.x), min(b.lo.y, p.y) };
+    b.hi = float2 { max(b.hi.x, p.x), max(b.hi.y, p.y) };
+}
+fn inflate(b: Bounds, by: float2) -> Bounds { Bounds { b.lo - by, b.hi + by } }
+fn offset(b: Bounds, by: float2) -> Bounds { Bounds { b.lo + by, b.hi + by } }
+fn union(b: Bounds, c: Bounds) -> Bounds {
+    Bounds { float2 { min(b.lo.x, c.lo.x), min(b.lo.y, c.lo.y) }, float2 { max(b.hi.x, c.hi.x), max(b.hi.y, c.hi.y) } }
+}
+// The bounds as whole pixels within the target; w 0 if none are.
+fn scissor_of(b: Bounds) -> Scissor {
+    if is_empty(b) { return Scissor { 0, 0, 0, 0 }; }
+    let x0 = clamp(floor(b.lo.x) as i64, 0, state.width);
+    let y0 = clamp(floor(b.lo.y) as i64, 0, state.height);
+    let x1 = clamp(ceil(b.hi.x) as i64, 0, state.width);
+    let y1 = clamp(ceil(b.hi.y) as i64, 0, state.height);
+    if x1 <= x0 || y1 <= y0 { return Scissor { 0, 0, 0, 0 }; }
+    Scissor { x0, y0, x1 - x0, y1 - y0 }
+}
+// Whether the scissor lets nothing through (an empty Bounds's).
+fn is_nothing(s: Scissor) -> bool { s.w == 0 && s.x == 0 && s.y == 0 && s.h == 0 }
+
+// One Bounds per layer being drawn (layer.goose), the innermost last:
+// what its block has drawn so far. Empty while no layer is open.
+var layer_bounds: Bounds[>..<] = [];
+fn in_layer() -> bool { layer_bounds.len > 0 }
+fn note_bounds(lo: float2, hi: float2) {
+    let b .= layer_bounds[layer_bounds.len - 1];
+    extend(b, lo);
+    extend(b, hi);
+}
 
 // A frame is passes, in order. A draw pass draws a run of batches into a
 // target, multisampled and resolved into `resolve` where that is given; a
@@ -238,6 +279,7 @@ struct Pass {
     height: i64,
     src: gfx::Texture,
     blur: BlurUniforms,
+    scissor: Scissor,       // a blur pass's: the pixels it writes
 }
 
 // The frame being recorded.
@@ -389,10 +431,12 @@ fn open_pass(target: gfx::Texture, resolve: gfx::Texture, samples: i32, clear: b
 
 // `src` blurred along dir (a texel, (1, 0) or (0, 1)) by sigma, or copied
 // for 0, into `target`, in a pass of its own between the draw passes.
-fn blur_pass(src: gfx::Texture, target: gfx::Texture, dir: float2, sigma: f32) {
+fn blur_pass(src: gfx::Texture, target: gfx::Texture, dir: float2, sigma: f32,
+             scissor: Scissor = Scissor { .. }) {
     passes.push(Pass { kind: PASS_BLUR, target: target, samples: 1, src: src,
                        blur: BlurUniforms { dir: dir, sigma: sigma }, width: state.width,
-                       height: state.height, first_batch: batches.len, end_batch: batches.len, .. });
+                       height: state.height, first_batch: batches.len, end_batch: batches.len,
+                       scissor: scissor, .. });
 }
 
 // Whether the current pass antialiases by samples, so paths need no fringe.
@@ -515,10 +559,13 @@ fn flush_batches() {
     let ramps = if renderer.ramp_rows > 0 { renderer.ramps } else { renderer.white };
     let glyphs = if atlas.id != 0 { atlas } else { renderer.white };
     let linear = renderer.samplers[2];      // linear, clamped
+    var run = 0;
     for p in passes {
         let view = float4 { p.width, p.height, 0.0, 0.0 };
         // A draw pass with nothing to draw that clears nothing is no pass.
         if p.kind == PASS_DRAW && p.end_batch == p.first_batch && !p.clear { continue; }
+        run++;
+        last_stats.passes = run;
         var desc = gfx::PassDesc { clear_color: p.clear, color_value: p.clear_color, .. };
         desc.color[0] = p.target;
         desc.resolve[0] = p.resolve;
@@ -527,6 +574,7 @@ fn flush_batches() {
             gfx::bind(renderer.blur);
             gfx::bind_texture(gfx::FRAGMENT, 0, p.src, linear);
             gfx::uniforms(gfx::FRAGMENT, 0, p.blur);
+            if p.scissor.w > 0 { gfx::scissor(p.scissor.x, p.scissor.y, p.scissor.w, p.scissor.h); }
             gfx::draw(3);
             gfx::end_pass();
             continue;
@@ -535,6 +583,7 @@ fn flush_batches() {
             let mask = if b.mask.id != 0 { b.mask } else { renderer.white };
             if b.kind == BATCH_COMPOSITE {
                 let c = composites[b.first];
+                if c.scissor.w < 0 { continue; }      // a clear done by the pass instead
                 gfx::bind(renderer.composite[b.blend]);
                 gfx::bind_texture(gfx::FRAGMENT, 0, c.layer, linear);
                 gfx::bind_texture(gfx::FRAGMENT, 1, if c.backdrop.id != 0 { c.backdrop } else { renderer.white },
@@ -542,7 +591,15 @@ fn flush_batches() {
                 gfx::bind_texture(gfx::FRAGMENT, 2, mask, linear);
                 gfx::bind_storage_buffer(gfx::FRAGMENT, 0, renderer.clips);
                 gfx::uniforms(gfx::FRAGMENT, 0, c.u);
-                gfx::draw(3);
+                if c.scissor.w > 0 {
+                    gfx::scissor(c.scissor.x, c.scissor.y, c.scissor.w, c.scissor.h);
+                    gfx::draw(3);
+                    // Back to the whole target (gfx passes the rectangle on as
+                    // it is, whatever its comment says of a width of 0).
+                    gfx::scissor(0, 0, p.width, p.height);
+                } else {
+                    gfx::draw(3);
+                }
                 continue;
             }
             let image = if b.texture.id == 0 { renderer.white } else { b.texture };
@@ -761,11 +818,30 @@ fn add(kind: u32, shape_flags: u32, local: Affine, geom: float4, radii: float4, 
     let flags = if state.aliased { shape_flags | FLAG_ALIASED } else { shape_flags };
     let k = paint_key(c);
     let m = mul(state.transform, local);
+    if in_layer() { note_instance(kind, flags, geom, m); }
     instances.push(Instance { m: float4 { m.a, m.b, m.c, m.d }, t: float2 { m.tx, m.ty },
                               kind: kind, flags: flags, geom: geom, radii: radii, color: k.color,
                               lm: float4 { local.a, local.b, local.c, local.d },
                               lt: float2 { local.tx, local.ty }, paint: k.paint, clip: state.clip });
     batch(BATCH_SHAPES, instances.len - 1, 1, k);
+}
+
+// The pixels an instance's quad covers (as shape.vert makes it), into the
+// layer's bounds.
+fn note_instance(kind: u32, flags: u32, geom: float4, m: Affine) {
+    var e = float2 { geom.x, geom.y };
+    if kind == KIND_PIE { e = float2 { geom.x, geom.x }; }
+    else if kind == KIND_ARC || kind == KIND_ARC_BUTT { e = float2 { geom.x + geom.w, geom.x + geom.w }; }
+    if (flags & FLAG_STROKE) != 0 { e = e + float2 { geom.z * 0.5, geom.z * 0.5 }; }
+    if kind == KIND_SHADOW { e = float2 { geom.x + 3.0 * geom.z, geom.y + 3.0 * geom.z }; }
+    let scales = axis_scales(m);
+    e = e + float2 { 1.5 / max(scales.x, 0.000001), 1.5 / max(scales.y, 0.000001) };
+    let a = apply(m, float2 { -e.x, -e.y });
+    let b = apply(m, float2 { e.x, -e.y });
+    let c = apply(m, float2 { e.x, e.y });
+    let d = apply(m, float2 { -e.x, e.y });
+    note_bounds(float2 { min(min(a.x, b.x), min(c.x, d.x)), min(min(a.y, b.y), min(c.y, d.y)) },
+                float2 { max(max(a.x, b.x), max(c.x, d.x)), max(max(a.y, b.y), max(c.y, d.y)) });
 }
 
 // Puts `count` more instances or indices from `first` in the last batch,
@@ -1214,15 +1290,24 @@ fn add_mesh(verts: const TessVertex[:], tris: const u32[:], c, k: f32, local: bo
     let r = byte(key.color.x);
     let g = byte(key.color.y);
     let b = byte(key.color.z);
+    let noting = in_layer();
+    var lo = float2 { 1e30, 1e30 };
+    var hi = float2 { -1e30, -1e30 };
     for v in verts {
         let color: u8[4] = [r, g, b, byte(key.color.w * v.alpha * k)];
+        let pos = if local { apply(m, v.p) } else { v.p };
+        if noting {
+            lo = float2 { min(lo.x, pos.x), min(lo.y, pos.y) };
+            hi = float2 { max(hi.x, pos.x), max(hi.y, pos.y) };
+        }
         if local {
-            mesh_vertices.push(MeshVertex { pos: apply(m, v.p), user: v.p, color: color, paint: key.paint });
+            mesh_vertices.push(MeshVertex { pos: pos, user: v.p, color: color, paint: key.paint });
         } else {
-            mesh_vertices.push(MeshVertex { pos: v.p, user: if ok { apply(inv, v.p) } else { v.p },
+            mesh_vertices.push(MeshVertex { pos: pos, user: if ok { apply(inv, v.p) } else { v.p },
                                             color: color, paint: key.paint });
         }
     }
+    if noting { note_bounds(lo, hi); }
     let first = mesh_indices.len;
     for i in tris { mesh_indices.push(base + i); }
     batch(BATCH_MESH, first, tris.len, key);

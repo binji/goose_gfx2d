@@ -68,6 +68,7 @@ where it shows:
 | `clips` | analytic clips: the clip chain in every fragment |
 | `path_clips` | path clips: a mask pass each |
 | `layers` | layers: a pass, a pass back and a composite each |
+| `small_layers` | small layers with blur and shadow: passes and composites scissored to their contents |
 | `blend_layers` | blend modes needing the backdrop: a copy more each |
 | `blur` | separable gaussian blur passes over the whole target |
 | `box_shadows` | analytic blurred rounded rects |

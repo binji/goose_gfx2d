@@ -185,6 +185,35 @@ fn main() {
     };
     check_area("multisampled star", msaa_area, star_area, 15);
 
+    // A layer's passes touch only what it drew: a block that draws nothing
+    // leaves no passes, and the blur's and the shadow's reach past the
+    // content is kept (their totals are whole).
+    draw(gfx2d::BLACK) { gfx2d::layer(0.5) { }; };
+    let empty_passes = gfx2d::stats().passes;
+    draw(gfx2d::BLACK) { gfx2d::layer(0.5) { everything(); }; };
+    print("empty layer: ", empty_passes, " pass, one with content ", gfx2d::stats().passes);
+    check_area("blurred in a layer, whole", area() {
+        gfx2d::layer(gfx2d::LayerDesc { blur: 4 }) { gfx2d::rect(40, 40, 30, 30, white); };
+    }, 900, 5);
+    draw(gfx2d::WHITE) {
+        gfx2d::layer(gfx2d::LayerDesc { shadow: gfx2d::rgba(0x000000, 1.0), shadow_offset: float2 { 20, 20 },
+                                        shadow_blur: 3 }) {
+            gfx2d::rect(30, 30, 20, 20, gfx2d::WHITE);
+        };
+    };
+    var dark = 0.0;
+    for i in W * W { dark += (255 - px[i * 4]) / 255.0; }
+    check_area("a blurred shadow, whole", dark, 400, 5);
+    // Nested: the inner layer's shadow counts as drawn by the outer one.
+    draw(gfx2d::WHITE) {
+        gfx2d::layer(0.5) {
+            gfx2d::layer(gfx2d::LayerDesc { shadow: gfx2d::rgba(0x000000, 1.0), shadow_offset: float2 { 40, 40 } }) {
+                gfx2d::rect(20, 20, 20, 20, gfx2d::WHITE);
+            };
+        };
+    };
+    print("nested shadow at half: ", near(70, 70, 128, 128, 128, 255), " ", near(50, 50, 255, 255, 255, 255));
+
     // The pool: a layer's textures of another size than the target's go
     // after POOL_IDLE_OTHER frames unused, the target's after POOL_IDLE.
     let small = gfx::render_target(64, 64, gfx::RGBA8);

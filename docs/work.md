@@ -116,7 +116,11 @@ and how to check it. Strike items out as they land.
     `clip_coverage` for paint 0 and clip 0. *Check:* the headless tests
     pixel for pixel, and `circles`' GPU time.
 
-11. **Layers are the target's size.** Every layer clears, draws and
+11. ~~**Layers are the target's size.**~~ Done, with `small_layers` in the
+    benchmark (GPU time 342 ms to 9 ms); a layer covering most of the
+    target keeps the plain clear. Note: gfx's comment on `scissor` says a
+    width of 0 means the whole target, but its C hands the rectangle to SDL
+    as it is, so gfx2d resets with the pass's size. Every layer clears, draws and
     composites a full-target texture (8 MB at 1080p), and a blur is up to
     48 taps a pass over all of it. `gfx` has `scissor`.
     *Change:* track the pixel bounds of what a layer's block draws

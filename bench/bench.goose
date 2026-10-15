@@ -376,6 +376,21 @@ fn layers() {
     }
 }
 
+// 20 small layers, cards with a shadow and a blur, as a UI has: what the
+// passes a layer costs come to when only its own pixels are touched.
+fn small_layers() {
+    seed(21);
+    for k in 20 {
+        let x = rand(0, W - 220);
+        let y = rand(0, H - 170);
+        gfx2d::layer(gfx2d::LayerDesc { opacity: 0.9, blur: 1, shadow: gfx2d::rgba(0x000000, 0.4),
+                                        shadow_offset: float2 { 4, 6 }, shadow_blur: 6 }) {
+            gfx2d::rounded_rect(x, y, 200, 150, 12, gfx2d::WHITE);
+            for i in 20 { gfx2d::circle(x + rand(10, 190), y + rand(10, 140), rand(3, 10), rand_color()); }
+        };
+    }
+}
+
 // 10 layers in modes that need the backdrop: a copy pass more each.
 fn blend_layers() {
     seed(18);
@@ -521,6 +536,7 @@ fn main() {
     run("clips") { f => clips(); };
     run("path_clips") { f => path_clips(); };
     run("layers") { f => layers(); };
+    run("small_layers") { f => small_layers(); };
     run("blend_layers") { f => blend_layers(); };
     run("blur") { f => blur(); };
     run("box_shadows") { f => box_shadows(); };

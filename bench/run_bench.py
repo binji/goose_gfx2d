@@ -49,6 +49,7 @@ CASES = {
     "clips": "100 rounded-rect clips, 100 circles in each",
     "path_clips": "20 star-shaped path clips, 50 rects in each",
     "layers": "20 layers at half opacity, 50 circles in each",
+    "small_layers": "20 small layers, cards with a shadow and a blur",
     "blend_layers": "10 layers in screen, overlay, ... modes, 20 circles in each",
     "blur": "a blurred layer with a drop shadow, 200 rounded rects",
     "box_shadows": "2,000 box shadows under 2,000 rounded rects",

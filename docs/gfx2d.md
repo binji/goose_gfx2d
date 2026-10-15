@@ -223,6 +223,11 @@ Goose program ──► gfx2d (Goose: shapes, paints, paths, text layout, passes
   * Layer, mask and canvas textures come from a pool kept between frames;
     one unused for eight frames (two, if it is not the target's size) is
     released.
+  * A layer's texture is the target's size, but only the pixels its block
+    draws, grown by its blur's and shadow's reach, are cleared, blurred and
+    composited (gfx's scissor); a block that draws nothing leaves no
+    passes. `BLEND_KEEP` composites the whole target, since it clears what
+    the layer does not cover.
 * **Paths:** curves are flattened after the transform, then tessellated:
   * a convex contour becomes a fan with an exact one-pixel fringe;
   * anything else is cut into bands at vertices and crossings, with spans
@@ -303,5 +308,6 @@ python bench/run_bench.py --goose …                       # bench/results.md
   their own, rather than uploaded each frame; SVG elliptical arcs.
 * **Text:** bitmap glyphs for small and pixel-art text; glow; HarfBuzz
   shaping.
-* **Layers:** a color matrix filter; layers the size of their contents;
-  scissor for axis-aligned rectangle clips.
+* **Layers:** a color matrix filter; layer textures the size of their
+  contents (their passes are scissored to them already); scissor for
+  axis-aligned rectangle clips.

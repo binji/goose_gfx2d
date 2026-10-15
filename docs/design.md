@@ -634,6 +634,14 @@ and ends with it.
   * A layer adds 2 passes, a backdrop blend mode 2 more, each blur 2, and
     a path clip 2. A draw pass with nothing to draw that clears nothing
     is skipped.
+  * A layer's passes touch only the pixels its block drew (the bounds of
+    its instances' quads and its meshes' vertices, and of the layers
+    inside it), grown by the reach of its blur and its shadow: the clear
+    is a scissored composite of nothing (or the pass's own clear, when the
+    bounds cover most of the target), the blur passes, the backdrop copy
+    and the composites are scissored, and a layer whose block drew nothing
+    is dropped, passes and all. `BLEND_KEEP` is the exception: it clears
+    the target wherever the layer is not, so it composites all of it.
   * Pooled textures come back every frame and are made again only when
     the target's size changes or gfx is reopened. One left unused for
     eight frames is released, or for two if it is not the target's size,

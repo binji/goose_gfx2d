@@ -125,54 +125,111 @@ struct LayerDesc {
     shadow_blur: f32 = 0.0,                     // the shadow's sigma, pixels
 }
 
-// `src` blurred by sigma both ways, into a texture of the pool.
-fn blurred(src: gfx::Texture, sigma: f32) -> gfx::Texture {
+// `src` blurred by sigma both ways, into a texture of the pool: within
+// `b`, what was drawn, grown by the blur's reach (3 sigma, and a pixel).
+// The first pass reads 3 sigma across and writes what the second reads,
+// 3 sigma further up and down; outside what either writes the pool's
+// textures hold whatever they did.
+fn blurred(src: gfx::Texture, sigma: f32, b: Bounds) -> gfx::Texture {
     let across = pooled(state.width, state.height, gfx::RGBA8, 1);
     let out = pooled(state.width, state.height, gfx::RGBA8, 1);
-    blur_pass(src, across, float2 { 1.0, 0.0 }, sigma);
-    blur_pass(across, out, float2 { 0.0, 1.0 }, sigma);
+    let reach = 3.0 * sigma + 1.0;
+    blur_pass(src, across, float2 { 1.0, 0.0 }, sigma, scissor_of(inflate(b, float2 { reach, 2.0 * reach })));
+    blur_pass(across, out, float2 { 0.0, 1.0 }, sigma, scissor_of(inflate(b, float2 { reach, reach })));
     out
 }
 
-fn composite(layer: gfx::Texture, backdrop: gfx::Texture, u: CompositeUniforms) {
-    composites.push(Composite { layer: layer, backdrop: backdrop, u: u });
+// A composite, as a batch: its index in composites.
+fn composite(layer: gfx::Texture, backdrop: gfx::Texture, u: CompositeUniforms, scissor: Scissor) -> i64 {
+    composites.push(Composite { layer: layer, backdrop: backdrop, u: u, scissor: scissor });
     let pipeline = if u.blend <= BLEND_REPLACE { u.blend as i32 } else { BLEND_REPLACE as i32 };
     batches.push(Batch { kind: BATCH_COMPOSITE, first: composites.len - 1, count: 1, blend: pipeline,
                          texture: gfx::Texture { 0 }, sampler: 2, mask: clip_masks[u.clip], clip: 0 });
+    composites.len - 1
 }
 
-// The block drawn into a layer, composited as `d` says.
+// The block drawn into a layer, composited as `d` says. The layer's
+// texture is the target's size, from the pool, but only the pixels the
+// block draws, grown by the blur's and the shadow's reach, are touched:
+// cleared (by a composite of nothing, scissored, in place of clearing it
+// all), blurred and composited. A block that draws nothing leaves no
+// passes behind.
 fn layer<F>(d: LayerDesc) {
     guard drawing();
     let back = passes[state.pass];
     let clip = state.clip;
     let tex = pooled(state.width, state.height, gfx::RGBA8, 1);
-    open_pass(tex, gfx::Texture { 0 }, 1, true);
+    open_pass(tex, gfx::Texture { 0 }, 1, false);
+    let layer_pass = state.pass;
+    // The clear, its scissor set once the block has drawn.
+    let clearing = composite(renderer.white, gfx::Texture { 0 },
+                             CompositeUniforms { opacity: 0.0, blend: BLEND_REPLACE as u32, .. }, Scissor { .. });
+    layer_bounds.push(Bounds { .. });
     // The layer's contents are clipped where it is composited.
     state.clip = 0;
     F();
     state.clip = clip;
     close_pass();
-    let content = if d.blur > 0.0 { blurred(tex, d.blur) } else { tex };
+    let drawn = layer_bounds.pop();
+    let shadowed = d.shadow.a > 0.0;
+    let reach = 3.0 * max(d.blur, if shadowed { d.shadow_blur } else { 0.0 }) + 1.0;
+    let cleared = scissor_of(inflate(drawn, float2 { 2.0 * reach, 2.0 * reach }));
+    if is_empty(drawn) || is_nothing(cleared) {
+        // Nothing drawn, or nothing in the target: the layer's pass is left
+        // out, and nothing is composited.
+        open_pass(back.target, back.resolve, back.samples, false);
+        passes[layer_pass].end_batch = passes[layer_pass].first_batch;
+        return;
+    }
+    // A layer covering most of the target is cleared the plain way, which
+    // is cheaper than a draw over most of it; the clearing composite is
+    // then skipped (a width of -1).
+    if cleared.w * cleared.h * 2 > state.width * state.height {
+        passes[layer_pass].clear = true;
+        composites[clearing].scissor = Scissor { 0, 0, -1, 0 };
+    } else {
+        composites[clearing].scissor = cleared;
+    }
+    let content_bounds = inflate(drawn, float2 { 3.0 * d.blur + 1.0, 3.0 * d.blur + 1.0 });
+    let content = if d.blur > 0.0 { blurred(tex, d.blur, drawn) } else { tex };
     var shadow = gfx::Texture { 0 };
-    if d.shadow.a > 0.0 { shadow = if d.shadow_blur > 0.0 { blurred(tex, d.shadow_blur) } else { tex }; }
+    var shadow_bounds = Bounds { .. };
+    if shadowed {
+        shadow = if d.shadow_blur > 0.0 { blurred(tex, d.shadow_blur, drawn) } else { tex };
+        shadow_bounds = offset(inflate(drawn, float2 { 3.0 * d.shadow_blur + 1.0, 3.0 * d.shadow_blur + 1.0 }),
+                               d.shadow_offset);
+    }
     open_pass(back.target, back.resolve, back.samples, false);
     if shadow.id != 0 {
-        composite(shadow, gfx::Texture { 0 },
-                  CompositeUniforms { tint: to_float4(d.shadow), offset: d.shadow_offset,
-                                      opacity: d.opacity, blend: BLEND_NORMAL as u32, shadow: 1,
-                                      clip: clip });
+        let sc = scissor_of(shadow_bounds);
+        if !is_nothing(sc) {
+            composite(shadow, gfx::Texture { 0 },
+                      CompositeUniforms { tint: to_float4(d.shadow), offset: d.shadow_offset,
+                                          opacity: d.opacity, blend: BLEND_NORMAL as u32, shadow: 1,
+                                          clip: clip }, sc);
+        }
     }
-    var backdrop = gfx::Texture { 0 };
-    if d.blend > BLEND_REPLACE {
-        // What is under the layer, copied, to blend with: from the target, or
-        // where a multisampled one resolves.
-        backdrop = pooled(state.width, state.height, gfx::RGBA8, 1);
-        close_pass();
-        blur_pass(if back.resolve.id != 0 { back.resolve } else { back.target }, backdrop, float2_0, 0.0);
-        open_pass(back.target, back.resolve, back.samples, false);
+    // KEEP changes the target wherever the layer is not, so it needs all of it.
+    let sc = if d.blend == BLEND_KEEP { Scissor { 0, 0, state.width, state.height } } else { scissor_of(content_bounds) };
+    if !is_nothing(sc) {
+        var backdrop = gfx::Texture { 0 };
+        if d.blend > BLEND_REPLACE {
+            // What is under the layer, copied, to blend with: from the target, or
+            // where a multisampled one resolves.
+            backdrop = pooled(state.width, state.height, gfx::RGBA8, 1);
+            close_pass();
+            blur_pass(if back.resolve.id != 0 { back.resolve } else { back.target }, backdrop, float2_0, 0.0, sc);
+            open_pass(back.target, back.resolve, back.samples, false);
+        }
+        composite(content, backdrop, CompositeUniforms { opacity: d.opacity, blend: clamp(d.blend, 0, 15) as u32,
+                                                         clip: clip, .. }, sc);
     }
-    composite(content, backdrop, CompositeUniforms { opacity: d.opacity, blend: clamp(d.blend, 0, 15) as u32,
-                                                     clip: clip, .. });
+    // What this layer puts on the target counts as drawn by the one around it.
+    if in_layer() {
+        let outer .= layer_bounds[layer_bounds.len - 1];
+        let mine = if shadowed { union(content_bounds, shadow_bounds) } else { content_bounds };
+        extend(outer, mine.lo);
+        extend(outer, mine.hi);
+    }
 }
 fn layer<F>(opacity: f64) { layer(LayerDesc { opacity: opacity as f32 }) { F(); }; }
