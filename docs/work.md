@@ -209,9 +209,10 @@ and how to check it. Strike items out as they land.
     *Change:* a small cache by texture id, cleared when `gfx` reopens; or an
     `image` overload that takes the size. *Check:* `sprites`' record time.
 
-After the performance items: run `bench/run_bench.py` whole on a quiet
+~~After the performance items: run `bench/run_bench.py` whole on a quiet
 machine and commit the new `bench/results.md`, which still has the numbers
-from before them and lacks `gradients_fresh` and `chart_translucent`.
+from before them and lacks `gradients_fresh` and `chart_translucent`.~~
+Done: two whole runs agreed within about 10%, and the lower is committed.
 Single runs here swung by 2x between them, so compare cases within one run.
 
 ## API and packaging
