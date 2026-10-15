@@ -82,6 +82,14 @@ def environment(goose, driver):
             if line.startswith("model name"):
                 cpu = line.split(":", 1)[1].strip()
                 break
+    elif platform.system() == "Windows":
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                                r"HARDWARE\DESCRIPTION\System\CentralProcessor\0") as key:
+                cpu = winreg.QueryValueEx(key, "ProcessorNameString")[0].strip()
+        except OSError:
+            pass
     gpu = None
     dev = first_line(["vulkaninfo", "--summary"], r"deviceName")
     drv = first_line(["vulkaninfo", "--summary"], r"driverInfo")
