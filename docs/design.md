@@ -69,7 +69,7 @@ goose_gfx2d/
     headless/          render to a texture, read back, compare (GOOSE_GFX_HEADLESS=1)
     pure/              color, path and tessellation tests that need no GPU
     window/            gfx2d_showcase.goose and run_window_test.py
-  third_party/stb      shallow submodule
+  third_party/stb      stb_truetype.h, vendored with its license
   third_party/fonts/   the default font: a Latin subset of Inter Regular, its OFL.txt, and
                        make_subset.sh and unwrap_extensions.py, which made it
   README.md  LICENSE

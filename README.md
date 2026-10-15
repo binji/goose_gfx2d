@@ -73,7 +73,7 @@ from its SVG and animated (the picture above is one of its frames).
 | `bench/` | benchmarks: `bench.goose`, `run_bench.py` and the latest `results.md` |
 | `test/run_tests.py` | runs the API check, `test/pure/` (no GPU) and `test/headless/` (renders into a texture and reads it back), comparing with `test/expected/` |
 | `test/window/` | the showcase, and `run_window_test.py`, which runs it JIT and AOT and compares their screenshots |
-| `third_party/stb` | shallow submodule; clone with `--recursive` |
+| `third_party/stb/` | `stb_truetype.h`, vendored with its license (the only third-party C) |
 | `third_party/fonts/` | the built-in font, a Latin subset of Inter Regular, its license (OFL 1.1), and the script that made it |
 
 All the modules are in `namespace gfx2d`.
@@ -90,5 +90,5 @@ Headless tests need a GPU device; without one they are reported skipped.
 
 ## License
 
-Apache License 2.0, as Goose and goose_gfx. stb is public domain (or MIT);
+Apache License 2.0, as Goose and goose_gfx. stb_truetype is public domain (or MIT);
 Inter is under the SIL Open Font License 1.1 (`third_party/fonts/OFL.txt`).

@@ -240,7 +240,7 @@ Single runs here swung by 2x between them, so compare cases within one run.
     when a wrap width is set. Both are breaking, so do them now.
     *Check:* the examples, the showcase, `pure_text`.
 
-20. **The stb submodule is the whole repository** for one header, and a
+20. ~~**The stb submodule is the whole repository**~~ Done. For one header, and a
     clone without `--recursive` builds nothing and fails later with
     undefined `gs_gfx2d_*` symbols. *Change:* vendor `stb_truetype.h`
     (public domain) under `third_party/stb/` with its license, drop the
