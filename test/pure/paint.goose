@@ -49,6 +49,24 @@ fn main() {
     print("ramp: ", ramp.len, " bytes, ", ramp[0], ",", ramp[1], ",", ramp[2], ",", ramp[3], " .. ",
           ramp[1020], ",", ramp[1021], ",", ramp[1022], ",", ramp[1023], "; middle alpha ",
           ramp[128 * 4 + 3], " red ", ramp[128 * 4]);
+    // The sRGB ramp, baked in one pass, agrees with gradient_at everywhere.
+    let varied = gfx2d::linear_gradient(0, 0, 1, 0, [
+        gfx2d::stop(0.1, gfx2d::rgba(0x336699, 0.2)), gfx2d::stop(0.3, gfx2d::ORANGE),
+        gfx2d::stop(0.3, gfx2d::LIME), gfx2d::stop(0.2, gfx2d::rgba(0xFF00FF, 0.7)),
+        gfx2d::stop(0.75, gfx2d::TRANSPARENT), gfx2d::stop(0.9, gfx2d::WHITE)]);
+    var fast: u8[>..<] = [];
+    gfx2d::append_ramp(varied, fast);
+    var worst = 0;
+    for i in 256 {
+        let c = gfx2d::premultiplied(gfx2d::gradient_at(varied, i / 255.0));
+        let want: f32[4] = [c.x, c.y, c.z, c.w];
+        for k in 4 {
+            let w = (gfx2d::saturate(want[k]) * 255.0 + 0.5) as i64;
+            worst = max(worst, abs(w - fast[i * 4 + k]));
+        }
+    }
+    print("one-pass ramp: off by at most ", worst);
+
     print("same ramp: ", gfx2d::same_ramp(bw, gfx2d::radial_gradient(5, 5, 9, bw.stops[..])), " ",
           gfx2d::same_ramp(bw, g));
 

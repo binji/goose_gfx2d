@@ -125,8 +125,9 @@ def main():
     rows = []
     for line in r.stdout.splitlines():
         if line.startswith("case "):
-            name, frames, rec, end, gpu, inst, tris, draws = line.split()[1:]
-            rows.append((name, float(rec), float(end), float(gpu), int(inst), int(tris), int(draws)))
+            name, frames, rec, end, gpu, inst, tris, draws, nbytes = line.split()[1:]
+            rows.append((name, float(rec), float(end), float(gpu), int(inst), int(tris), int(draws),
+                         int(nbytes)))
 
     lines = [
         "# gfx2d benchmark results",
@@ -152,12 +153,13 @@ def main():
         "(uploads and the pass), both CPU; *gpu* is `gfx::flush()`, submitting and "
         "waiting for the GPU.",
         "",
-        "| case | draws what | record | end | gpu | total | instances | triangles | draw calls |",
-        "|---|---|--:|--:|--:|--:|--:|--:|--:|",
+        "| case | draws what | record | end | gpu | total | instances | triangles | draw calls | uploaded |",
+        "|---|---|--:|--:|--:|--:|--:|--:|--:|--:|",
     ]
-    for name, rec, end, gpu, inst, tris, draws in rows:
+    for name, rec, end, gpu, inst, tris, draws, nbytes in rows:
         lines.append(f"| `{name}` | {CASES.get(name, '')} | {rec:.2f} | {end:.2f} | {gpu:.2f} | "
-                     f"{rec + end + gpu:.2f} | {inst:,} | {tris:,} | {draws:,} |")
+                     f"{rec + end + gpu:.2f} | {inst:,} | {tris:,} | {draws:,} | "
+                     f"{nbytes / 1e6:.1f} MB |")
     lines.append("")
     with open(args.out, "w", newline="\n") as fh:
         fh.write("\n".join(lines))

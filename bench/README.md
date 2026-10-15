@@ -31,7 +31,13 @@ Each case runs five frames untimed (the first frame of a case builds
 pipelines, grows buffers and fills the glyph atlas), then `--frames` timed
 ones. Each column is the median. Every frame of a case draws the same
 thing from the same seeds, so only the timing varies. The table also gives
-what the last frame drew: shape instances, mesh triangles and draw calls.
+what the last frame drew: shape instances, mesh triangles, draw calls, and
+the bytes `end()` uploaded (instances, mesh vertices and indices, paints).
+
+`end` grows with bytes uploaded faster than in proportion on some drivers:
+goose_gfx's `update_buffer` creates a transfer buffer per call, and on
+Intel's Linux Vulkan driver allocating tens of megabytes a frame is most of
+`end`'s time.
 
 ## The cases
 

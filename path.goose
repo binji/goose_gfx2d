@@ -209,7 +209,17 @@ fn bounds(p: const Path&) -> Rect {
 // --- flattening ----------------------------------------------------------------------
 
 // A run of points in a flattened path: pts[first .. first + count].
-struct Contour { first: i64, count: i64, closed: bool }
+// A stroke's outline marks up to two runs of edges (edge i runs from point i
+// to the next), skip_a_n from skip_a and skip_b_n from skip_b, as inside the
+// stroke, where one piece of it meets another, to get no antialiasing
+// fringe; and numbers its pieces, each tessellated alone.
+struct Contour { first: i64, count: i64, closed: bool, skip_a: i64 = 0, skip_a_n: i64 = 0,
+                 skip_b: i64 = 0, skip_b_n: i64 = 0, group: i64 = 0 }
+
+fn has_inner_edges(c: Contour) -> bool { c.skip_a_n > 0 || c.skip_b_n > 0 }
+fn is_inner_edge(c: Contour, i: i64) -> bool {
+    (i >= c.skip_a && i < c.skip_a + c.skip_a_n) || (i >= c.skip_b && i < c.skip_b + c.skip_b_n)
+}
 
 // Straight-line segments for the path after m, none further than
 // `tolerance` from the curve: appended to pts and contours. Bézier curves
@@ -428,16 +438,30 @@ fn add_quad(idx: u32[>..<]&, a: u32, b: u32, c: u32, d: u32) {
 
 // An edge going down, from y0 to y1 > y0, with the direction the contour
 // went it: +1 down, -1 up.
-struct Edge { x0: f32, y0: f32, x1: f32, y1: f32, dir: i32 }
+struct Edge { x0: f32, y0: f32, x1: f32, y1: f32, dir: i32, id: i32 }
 fn x_at(e: Edge, y: f32) -> f32 { e.x0 + (e.x1 - e.x0) * (y - e.y0) / (e.y1 - e.y0) }
 
 // An edge across one band: x at its top and bottom.
-struct Crossing { xa: f32, xb: f32, dir: i32 }
+struct Crossing { xa: f32, xb: f32, dir: i32, edge: i32 }
+
+// A trapezoid still growing down: between two edges, from `top`, for as
+// long as the same two edges bound a span in each band.
+struct OpenTrap { left: i32, right: i32, top: f32, seen: bool }
 
 var tess_edges: Edge[>..<] = [];
 var tess_ys: f32[>..<] = [];
 var tess_active: Edge[>..<] = [];
 var tess_band: Crossing[>..<] = [];
+var tess_open: OpenTrap[>..<] = [];
+
+// Past this much work (edges looked at, band after band) or this many
+// vertices out, a fill gives up, drawing what it has, rather than take
+// minutes or run out of memory: what a path of thousands of points crossing
+// each other everywhere would need. Ordinary paths, a 5,000-point outline
+// included, need a small fraction of it. tess_gave_up says it did.
+let MAX_WORK = 20000000;
+let MAX_VERTICES = 4000000;
+var tess_gave_up = false;
 
 // The closed contours' fill by `rule`, as triangles appended to out and
 // idx. `fringe` is how wide the antialiasing fringe is, in the units of pts
@@ -449,7 +473,9 @@ fn fill_triangles(pts: const float2[:], contours: const Contour[:], rule: i64, f
     if live == 0 { return; }
     if live == 1 {
         for c in contours {
-            if c.count >= 3 && is_convex(pts, c) {
+            // Not one with inner edges: the convex fill moves its outline in,
+            // which would leave a gap where it meets another piece.
+            if c.count >= 3 && !has_inner_edges(c) && is_convex(pts, c) {
                 fill_convex(pts, c, fringe, out, idx);
                 return;
             }
@@ -472,6 +498,7 @@ fn fill_triangles(pts: const float2[:], contours: const Contour[:], rule: i64, f
                 add_vertex(out, p + n * float2 { half, half }, 0.0);
             }
             for i in c.count {
+                if is_inner_edge(c, i) { continue; }
                 let j = (i + 1) % c.count;
                 add_quad(idx, base + 2 * i as u32, base + 2 * j as u32, base + 2 * j as u32 + 1,
                          base + 2 * i as u32 + 1);
@@ -519,15 +546,18 @@ fn fill_bands(pts: const float2[:], contours: const Contour[:], rule: i64,
             let a = pts[c.first + i];
             let b = pts[c.first + (i + 1) % c.count];
             if a.y == b.y { continue; }
-            if a.y < b.y { tess_edges.push(Edge { a.x, a.y, b.x, b.y, 1 }); }
-            else { tess_edges.push(Edge { b.x, b.y, a.x, a.y, -1 }); }
+            if a.y < b.y { tess_edges.push(Edge { a.x, a.y, b.x, b.y, 1, 0 }); }
+            else { tess_edges.push(Edge { b.x, b.y, a.x, a.y, -1, 0 }); }
             tess_ys.push(a.y);
         }
     }
     if tess_edges.len == 0 { return; }
     sort(tess_edges) { a, b => a.y0 < b.y0 };
+    for &e, i in tess_edges { e.id = i as i32; }
     sort(tess_ys);
     tess_active.resize(0);
+    tess_open.resize(0);
+    var work = 0;
     var next = 0;
     var k = 0;
     while k < tess_ys.len {
@@ -553,15 +583,21 @@ fn fill_bands(pts: const float2[:], contours: const Contour[:], rule: i64,
         tess_active.resize(w);
         var ya = y_top;
         while ya < y_end {
+            if work > MAX_WORK || out.len > MAX_VERTICES {
+                tess_gave_up = true;
+                close_traps(ya, out, idx);
+                return;
+            }
             // The band, cut short at a crossing until none is left in it.
             // Sorted by x at its middle, which orders a band without
             // crossings the same everywhere in it; where that order differs
             // at the top or bottom of the band, two neighbors in it cross.
             var yb = y_end;
             loop {
+                work += tess_active.len + 1;
                 tess_band.resize(0);
                 for e in tess_active {
-                    tess_band.push(Crossing { x_at(e, ya), x_at(e, yb), e.dir });
+                    tess_band.push(Crossing { x_at(e, ya), x_at(e, yb), e.dir, e.id });
                 }
                 sort(tess_band) { a, b => a.xa + a.xb < b.xa + b.xb };
                 var cut = yb;
@@ -576,39 +612,92 @@ fn fill_bands(pts: const float2[:], contours: const Contour[:], rule: i64,
                 if cut >= yb { break; }
                 yb = cut;
             }
-            emit_spans(rule, ya, yb, out, idx);
+            band_spans(rule, ya, out, idx);
             ya = yb;
         }
     }
+    close_traps(tess_ys[tess_ys.len - 1], out, idx);
 }
 
-// The band's filled spans, each a trapezoid.
-fn emit_spans(rule: i64, ya: f32, yb: f32, out: TessVertex[>..<]&, idx: u32[>..<]&) {
+// The band from ya's filled spans: each continues the open trapezoid of
+// the same two edges, or starts one; open trapezoids no span continued end
+// at ya.
+fn band_spans(rule: i64, ya: f32, out: TessVertex[>..<]&, idx: u32[>..<]&) {
+    for &t in tess_open { t.seen = false; }
     var winding = 0;
-    var left = Crossing { 0.0, 0.0, 0 };
+    var left: i32 = -1;
     for c in tess_band {
         let was = filled(winding, rule);
         winding += c.dir;
         let now = filled(winding, rule);
         if !was && now {
-            left = c;
+            left = c.edge;
         } else if was && !now {
-            if c.xa - left.xa > 0.000001 || c.xb - left.xb > 0.000001 {
-                let a = add_vertex(out, float2 { left.xa, ya }, 1.0);
-                let b = add_vertex(out, float2 { c.xa, ya }, 1.0);
-                let d = add_vertex(out, float2 { c.xb, yb }, 1.0);
-                let e = add_vertex(out, float2 { left.xb, yb }, 1.0);
-                add_quad(idx, a, b, d, e);
+            var found = false;
+            for &t in tess_open {
+                if t.left == left && t.right == c.edge {
+                    t.seen = true;
+                    found = true;
+                    break;
+                }
             }
+            if !found { tess_open.push(OpenTrap { left, c.edge, ya, true }); }
         }
     }
+    // The ones not continued, out; the rest kept, in order.
+    var w = 0;
+    for t in tess_open {
+        if t.seen {
+            tess_open[w] = t;
+            w++;
+        } else {
+            emit_trap(t, ya, out, idx);
+        }
+    }
+    tess_open.resize(w);
+}
+
+fn close_traps(y: f32, out: TessVertex[>..<]&, idx: u32[>..<]&) {
+    for t in tess_open { emit_trap(t, y, out, idx); }
+    tess_open.resize(0);
+}
+
+// A trapezoid between its edges from its top to y.
+fn emit_trap(t: OpenTrap, y: f32, out: TessVertex[>..<]&, idx: u32[>..<]&) {
+    if y <= t.top { return; }
+    let l = tess_edges[t.left];
+    let r = tess_edges[t.right];
+    let lt = x_at(l, t.top);
+    let rt = x_at(r, t.top);
+    let lb = x_at(l, y);
+    let rb = x_at(r, y);
+    if rt - lt <= 0.000001 && rb - lb <= 0.000001 { return; }
+    let a = add_vertex(out, float2 { lt, t.top }, 1.0);
+    let b = add_vertex(out, float2 { rt, t.top }, 1.0);
+    let d = add_vertex(out, float2 { rb, y }, 1.0);
+    let e = add_vertex(out, float2 { lb, y }, 1.0);
+    add_quad(idx, a, b, d, e);
 }
 
 // --- stroking --------------------------------------------------------------------------
 
+// A stroke longer than this many segments is outlined in pieces of about
+// this many, each tessellated alone: the band tessellator's work grows with
+// the square of an outline's length, which a chart's thousand-point line, as
+// one outline, makes ruinous. Pieces meet across the middle of a segment,
+// where both have the same butt end, so they leave no gap; the longest
+// segment in the second half of each piece is the one cut, and they do not
+// overlap either unless even it is too short for the stroke's width (shorter
+// than about the width, with sharp joins beside it), which only a
+// translucent stroke shows.
+let STROKE_CHUNK = 16;
+
+var piece_pts: float2[>..<] = [];
+
 // The outline of a stroke of `half` half width along the contours, as closed
 // contours appended to out_pts and out_contours, to be filled by the
-// nonzero rule. Round joins and caps are flattened to `tolerance`.
+// nonzero rule, each group of them (Contour.group) on its own. Round joins
+// and caps are flattened to `tolerance`.
 fn stroke_outline(pts: const float2[:], contours: const Contour[:], half: f32, join: i64,
                   cap: i64, miter_limit: f32, tolerance: f32, out_pts: float2[>..<]&,
                   out_contours: Contour[>..<]&) {
@@ -669,17 +758,17 @@ fn stroke_outline(pts: const float2[:], contours: const Contour[:], half: f32, j
         out_pts.push(p1);
     }
     // A cap at p, the end of travel in direction d, from the left side to
-    // the right.
-    fn add_cap(p: float2, d: float2) {
+    // the right; `kind` a CAP_*, or -1 for where pieces meet, a butt end.
+    fn add_cap(p: float2, d: float2, kind: i64) {
         let n = perp(d);
         let h = float2 { half, half };
-        if cap == 1 {               // CAP_ROUND
+        if kind == 1 {              // CAP_ROUND
             out_pts.push(p + n * h);
             arc_points(p, n, d);
             out_pts.push(p + d * h);
             arc_points(p, d, n * float2 { -1, -1 });
             out_pts.push(p - n * h);
-        } else if cap == 2 {        // CAP_SQUARE
+        } else if kind == 2 {       // CAP_SQUARE
             out_pts.push(p + n * h + d * h);
             out_pts.push(p - n * h + d * h);
         } else {
@@ -688,18 +777,52 @@ fn stroke_outline(pts: const float2[:], contours: const Contour[:], half: f32, j
         }
     }
     fn start_outline() -> i64 { out_pts.len }
-    fn finish(first: i64) {
+    var group = 0;
+    // The outline from `first` on, a contour of its own group; its inner
+    // edges skip_a_n from skip_a and skip_b_n from skip_b, counted from
+    // first.
+    fn finish(first: i64, skip_a: i64, skip_a_n: i64, skip_b: i64, skip_b_n: i64) {
         // The last point is often the first again.
         if out_pts.len - first >= 2 {
             let a = out_pts[first];
             let b = out_pts[out_pts.len - 1];
             if abs(a.x - b.x) < 0.00001 && abs(a.y - b.y) < 0.00001 { out_pts.resize(out_pts.len - 1); }
         }
-        if out_pts.len - first >= 3 {
-            out_contours.push(Contour { first: first, count: out_pts.len - first, closed: true });
+        let count = out_pts.len - first;
+        if count >= 3 {
+            out_contours.push(Contour { first: first, count: count, closed: true,
+                                        skip_a: skip_a, skip_a_n: if skip_a < count { skip_a_n } else { 0 },
+                                        skip_b: skip_b, skip_b_n: if skip_b < count { skip_b_n } else { 0 },
+                                        group: group });
+            group++;
         } else {
             out_pts.resize(first);
         }
+    }
+
+    // An open stroke along piece_pts, with a cap of `start` and `end`
+    // (CAP_*, or -1 for a butt end where the stroke goes on in another
+    // piece, an edge inside the stroke): out along the left side, round the
+    // end, back along the right, round the start.
+    fn outline_piece(start: i64, end: i64) {
+        let m = piece_pts.len;
+        fn p(i: i64) -> float2 { piece_pts[i] }
+        fn d(i: i64) -> float2 { unit(piece_pts[i + 1] - piece_pts[i]) }
+        fn l(i: i64) -> f32 { length(piece_pts[i + 1] - piece_pts[i]) }
+        let f = start_outline();
+        let h = float2 { half, half };
+        out_pts.push(p(0) + perp(d(0)) * h);
+        for i in 1..m - 1 { add_join(p(i), d(i - 1), d(i), 1.0, l(i - 1), l(i)); }
+        let end_edge = out_pts.len - f;
+        add_cap(p(m - 1), d(m - 2), end);
+        var i = m - 2;
+        while i >= 1 {
+            add_join(p(i), d(i) * float2 { -1, -1 }, d(i - 1) * float2 { -1, -1 }, 1.0, l(i), l(i - 1));
+            i--;
+        }
+        let start_edge = out_pts.len - f;
+        add_cap(p(0), d(0) * float2 { -1, -1 }, start);
+        finish(f, end_edge, if end < 0 { 1 } else { 0 }, start_edge, if start < 0 { 1 } else { 0 });
     }
 
     for c in contours {
@@ -710,19 +833,22 @@ fn stroke_outline(pts: const float2[:], contours: const Contour[:], half: f32, j
             let p = pts[c.first];
             if cap == 0 { continue; }
             let f = start_outline();
-            add_cap(p, float2 { 1, 0 });
-            add_cap(p, float2 { -1, 0 });
-            finish(f);
+            add_cap(p, float2 { 1, 0 }, cap);
+            add_cap(p, float2 { -1, 0 }, cap);
+            finish(f, 0, 0, 0, 0);
             continue;
         }
-        fn at(i: i64) -> float2 { pts[c.first + (i + n) % n] }
+        fn at(i: i64) -> float2 { pts[c.first + (i % n + n) % n] }
         fn dir(i: i64) -> float2 { unit(at(i + 1) - at(i)) }   // the segment from point i
         fn len(i: i64) -> f32 { length(at(i + 1) - at(i)) }
-        if c.closed && n >= 3 {
+        let looped = c.closed && n >= 3;
+        let segs = if looped { n } else { n - 1 };
+        if looped && segs <= STROKE_CHUNK {
             // Two loops: along the left side, and back along the right.
             var f = start_outline();
             for i in n { add_join(at(i), dir(i - 1), dir(i), 1.0, len(i - 1), len(i)); }
-            finish(f);
+            finish(f, 0, 0, 0, 0);
+            group--;        // the two loops are one outline
             f = start_outline();
             var i = n;
             while i > 0 {
@@ -730,26 +856,41 @@ fn stroke_outline(pts: const float2[:], contours: const Contour[:], half: f32, j
                          len(i), len(i - 1));
                 i--;
             }
-            finish(f);
-        } else {
-            // Out along the left, round the end, back along the right, round
-            // the start.
-            let f = start_outline();
-            let h = float2 { half, half };
-            let last = n - 1;
-            let d0 = dir(0);
-            let dn = unit(at(last) - at(last - 1));
-            out_pts.push(at(0) + perp(d0) * h);
-            for i in 1..last { add_join(at(i), dir(i - 1), dir(i), 1.0, len(i - 1), len(i)); }
-            add_cap(at(last), dn);
-            var i = last - 1;
-            while i >= 1 {
-                add_join(at(i), dir(i) * float2 { -1, -1 }, dir(i - 1) * float2 { -1, -1 }, 1.0,
-                         len(i), len(i - 1));
-                i--;
+            finish(f, 0, 0, 0, 0);
+            continue;
+        }
+        // Pieces of about STROKE_CHUNK segments, cut across the middle of a
+        // segment: a butt end both pieces share, point for point, so they
+        // neither overlap nor leave a gap. An open line's first and last
+        // pieces have its caps; a loop's pieces go round from the middle of
+        // its first segment.
+        fn mid(i: i64) -> float2 { (at(i) + at(i + 1)) * float2 { 0.5, 0.5 } }
+        var from = if looped { 0 } else { -1 };     // the segment cut at the start; -1: point 0
+        loop {
+            // The segment cut at the end; an open line's last piece ends at
+            // its last point instead, a loop's at the middle of its first
+            // segment again (segment segs).
+            var to = from + STROKE_CHUNK;
+            let last = if looped { to >= segs } else { to >= segs - 1 };
+            if last {
+                to = segs;
+            } else {
+                // The longest segment in the second half of the piece: the
+                // joins beside a cut must not reach across it, or the pieces
+                // overlap there, which shows in a translucent stroke.
+                var best = to;
+                for k in from + STROKE_CHUNK / 2 + 1..to + 1 {
+                    if len(k) > len(best) { best = k; }
+                }
+                to = best;
             }
-            add_cap(at(0), d0 * float2 { -1, -1 });
-            finish(f);
+            piece_pts.resize(0);
+            piece_pts.push(if from < 0 { at(0) } else { mid(from) });
+            for v in max(from + 1, 1)..to + 1 { piece_pts.push(at(v)); }
+            if looped || !last { piece_pts.push(mid(to)); }
+            outline_piece(if from < 0 { cap } else { -1 }, if last && !looped { cap } else { -1 });
+            if last { break; }
+            from = to;
         }
     }
 }

@@ -8,6 +8,7 @@ to transparent: 255,0,0,128
 no stops: 0,0,0,0, one stop: 0,255,0,255 0,255,0,255
 stops kept: 16
 ramp: 1024 bytes, 255,0,0,255 .. 0,0,0,0; middle alpha 127 red 127
+one-pass ramp: off by at most 1
 same ramp: true false
 linear(): 1 2 opacity 0.5 blend 1
 radial: vec2<f32> { 10.0, 20.0 } focal vec2<f32> { 12.0, 22.0 } radius 30.0

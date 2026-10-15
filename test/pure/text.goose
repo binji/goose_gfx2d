@@ -67,6 +67,24 @@ fn main() {
     }
     print("each fits: ", fits, "; measured height ", r(gfx2d::measure_text(text, style).y), " = ",
           lines.len, " x ", r(gfx2d::font_line_height(f, 16)));
+    // A long paragraph, greedily: every line fits, and none could take the
+    // next line's first word too.
+    var para: u8[>..] = [];
+    for k in 30 { para.append("Sphinx of black quartz, judge my vow; waltz, nymph, for quick jigs vex Bud. "); }
+    let narrow = gfx2d::TextStyle { size: 15, wrap_width: 230, letter_spacing: 0.5 };
+    var starts: i64[>..] = [];
+    var ends: i64[>..] = [];
+    gfx2d::each_line(para, narrow) { from, to => starts.push(from); ends.push(to); };
+    var greedy = true;
+    for k in starts.len {
+        if gfx2d::line_width(para, starts[k], ends[k], narrow) > 230 { greedy = false; }
+        if k + 1 < starts.len {
+            var next_end = starts[k + 1];
+            while next_end < para.len && para[next_end] != ' ' { next_end++; }
+            if gfx2d::line_width(para, starts[k], next_end, narrow) <= 230 { greedy = false; }
+        }
+    }
+    print("long paragraph: ", starts.len, " lines, each full and fitting ", greedy);
     var long_word: u8[>..] = [];
     gfx2d::each_line("a supercalifragilistic b", gfx2d::TextStyle { size: 16, wrap_width: 30 }) { from, to =>
         long_word.append(str(to - from, " "));

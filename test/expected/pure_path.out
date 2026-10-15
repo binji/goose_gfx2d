@@ -29,4 +29,7 @@ self-crossing: ok
 dashes: ok
 dashes, round caps: ok
 dot: ok
+zigzag in pieces: 7 groups; no overlap true, union true
+wave in pieces: 9 groups; no overlap true
+circle in pieces: true groups; no overlap true, the ring's area true
 transformed: gfx2d::Rect { 5.0, 5.0, 20.0, 20.0 }

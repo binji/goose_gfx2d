@@ -87,12 +87,12 @@ let PAINT_SCREEN: u32 = 1;
 let INSTANCE_SIZE = 112;
 let PAINT_SIZE = 96;
 
-// One vertex of a tessellated path, as src/shaders/mesh.vert reads it.
+// One vertex of a tessellated path, as src/shaders/mesh.vert reads it: 24
+// bytes, since a frame of strokes can upload a million of them.
 struct MeshVertex {
     pos: float2,            // pixels
     user: float2,           // the space it was drawn in, for its paint
-    color: float4,
-    alpha: f32,             // coverage
+    color: u8[4],           // sRGB, straight; alpha times the coverage there
     paint: u32,
 }
 
@@ -151,10 +151,13 @@ var batches: Batch[>..<] = [];
 var paints: PaintGPU[>..<] = [];
 var ramp_gradients: Gradient[>..<] = [];    // the frame's ramps, a row each
 var ramp_pixels: u8[>..<] = [];
+var ramp_hashes: u64[>..<] = [];           // by row
+var ramp_table: i64[>..<] = [];            // open addressing: row + 1, 0 empty
 var saved: Affine[>..<] = [];               // push()'s transforms
 
 // What the last end() drew.
-struct Stats { instances: i64, triangles: i64, draws: i64, paints: i64, ramps: i64 }
+struct Stats { instances: i64, triangles: i64, draws: i64, paints: i64, ramps: i64,
+               bytes: i64 }     // uploaded: instances, mesh vertices and indices, paints
 var last_stats: Stats;
 
 var misuse_count = 0;
@@ -194,6 +197,8 @@ fn begin_into(target: gfx::Texture, clear: bool, clear_color: Color) {
     batches.resize(0);
     saved.resize(0);
     ramp_gradients.resize(0);
+    ramp_hashes.resize(0);
+    ramp_table.resize(0);
     ramp_pixels.resize(0);
     paints.resize(0);
     // Paint 0: the instance's color alone.
@@ -233,7 +238,9 @@ fn ensure_renderer() {
     let mesh_fs = embed_shader("src/shaders/mesh.frag");
     for mode, i in modes {
         renderer.pipelines[i] = gfx::pipeline(vs, fs, gfx::PipelineDesc { blend: mode });
-        renderer.mesh_pipelines[i] = gfx::pipeline(mesh_vs, mesh_fs, gfx::PipelineDesc { blend: mode });
+        var mesh = gfx::PipelineDesc { blend: mode };
+        mesh.formats[2] = gfx::VERTEX_UBYTE4_NORM;      // the color's bytes
+        renderer.mesh_pipelines[i] = gfx::pipeline(mesh_vs, mesh_fs, mesh);
     }
     let filters: i32[2] = [gfx::LINEAR, gfx::NEAREST];
     let wraps: i32[3] = [gfx::REPEAT, gfx::MIRROR, gfx::CLAMP];
@@ -272,7 +279,9 @@ fn upload_ramps() {
 
 fn flush_batches() {
     last_stats = Stats { instances: instances.len, triangles: mesh_indices.len / 3,
-                         draws: batches.len, paints: paints.len - 1, ramps: ramp_gradients.len };
+                         draws: batches.len, paints: paints.len - 1, ramps: ramp_gradients.len,
+                         bytes: instances.len * INSTANCE_SIZE + bytes_of(mesh_vertices).len +
+                                mesh_indices.len * 4 + paints.len * PAINT_SIZE };
     if batches.len == 0 && !state.clear { return; }
     ensure_renderer();
     if batches.len > 0 {
@@ -316,12 +325,50 @@ fn flush_batches() {
 // The row of the frame's ramp atlas holding g's ramp, added if no
 // gradient so far has the same one.
 fn ramp_row(g: Gradient) -> i64 {
-    for other, i in ramp_gradients {
-        if same_ramp(other, g) { return i; }
+    let h = ramp_hash(g);
+    if (ramp_gradients.len + 1) * 2 > ramp_table.len {
+        // Twice the room, the rows so far put in again.
+        let n = max(ramp_table.len * 2, 64);
+        ramp_table.resize(0);
+        ramp_table.resize(n, 0);
+        for other, row in ramp_hashes { place_ramp(other, row); }
+    }
+    let mask = ramp_table.len - 1;
+    var i = (h as i64) & mask;
+    while ramp_table[i] != 0 {
+        let row = ramp_table[i] - 1;
+        if ramp_hashes[row] == h && same_ramp(ramp_gradients[row], g) { return row; }
+        i = (i + 1) & mask;
     }
     ramp_gradients.push(g);
+    ramp_hashes.push(h);
     append_ramp(g, ramp_pixels);
-    ramp_gradients.len - 1
+    let row = ramp_gradients.len - 1;
+    ramp_table[i] = row + 1;
+    row
+}
+
+fn place_ramp(h: u64, row: i64) {
+    let mask = ramp_table.len - 1;
+    var i = (h as i64) & mask;
+    while ramp_table[i] != 0 { i = (i + 1) & mask; }
+    ramp_table[i] = row + 1;
+}
+
+// A hash of what makes a ramp: the space and the stops, each quantized
+// finer than a ramp can show.
+fn ramp_hash(g: Gradient) -> u64 {
+    var h: u64 = 14695981039346656037;
+    fn mix(v: i64) {
+        h ^= v as u64;
+        h *= 1099511628211;
+    }
+    mix(g.space);
+    for s in g.stops {
+        mix(round(s.offset * 65536.0) as i64);
+        mix(to_u32(s.color));
+    }
+    h ^ (h >> 29)
 }
 
 // p's index in the frame's paints, added unless it is the last one added.
@@ -724,16 +771,28 @@ var tess_idx: u32[>..<] = [];
 // The current transform's scale: how many pixels a unit is, on average.
 fn pixel_scale() -> f32 { sqrt(abs(determinant(state.transform))) }
 
+var warned_complex = false;
+
 // tess_out and tess_idx, in pixels, as a mesh painted with c, its alpha
 // multiplied by k.
 fn add_mesh(c, k: f32) {
+    if tess_gave_up && !warned_complex {
+        write_stderr("gfx2d: a path too complex to fill whole (millions of crossings) was drawn in part\n");
+        warned_complex = true;
+    }
+    tess_gave_up = false;
     if tess_idx.len == 0 { return; }
     let key = paint_key(c);
     let inv, ok = invert(state.transform);
     let base = mesh_vertices.len as u32;
+    fn byte(x: f32) -> u8 { (saturate(x) * 255.0 + 0.5) as u8 }
+    let r = byte(key.color.x);
+    let g = byte(key.color.y);
+    let b = byte(key.color.z);
     for v in tess_out {
         mesh_vertices.push(MeshVertex { pos: v.p, user: if ok { apply(inv, v.p) } else { v.p },
-                                        color: key.color, alpha: v.alpha * k, paint: key.paint });
+                                        color: [r, g, b, byte(key.color.w * v.alpha * k)],
+                                        paint: key.paint });
     }
     let first = mesh_indices.len;
     for i in tess_idx { mesh_indices.push(base + i); }
@@ -791,9 +850,17 @@ fn stroke(p: const Path&, s: Stroke, c) {
     if !s.pixels {
         for &q in outline_pts { q = apply(state.transform, q); }
     }
+    // Each piece of the outline tessellated alone (stroke_outline's
+    // STROKE_CHUNK).
     tess_out.resize(0);
     tess_idx.resize(0);
-    fill_triangles(outline_pts, outline_cs, NONZERO, 1.0, tess_out, tess_idx);
+    var a = 0;
+    while a < outline_cs.len {
+        var b = a + 1;
+        while b < outline_cs.len && outline_cs[b].group == outline_cs[a].group { b++; }
+        fill_triangles(outline_pts, outline_cs[a..b], NONZERO, 1.0, tess_out, tess_idx);
+        a = b;
+    }
     add_mesh(c, k);
 }
 

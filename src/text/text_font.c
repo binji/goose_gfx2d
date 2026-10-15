@@ -23,6 +23,7 @@
 #pragma GCC diagnostic pop
 #endif
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -137,26 +138,113 @@ int32_t gs_gfx2d_font_kern(gs_gfx2d_font f, int32_t glyph1, int32_t glyph2) {
     return s ? stbtt_GetGlyphKernAdvance(&s->info, glyph1, glyph2) : 0;
 }
 
+/* The squared distance transform of one row or column of `grid`, in place
+   (Felzenszwalb and Huttenlocher): each cell becomes the least of every
+   cell's value plus its squared distance. f, v and z are scratch of
+   length + 1. */
+static void edt_1d(float *grid, int offset, int stride, int length, float *f, int *v, float *z) {
+    v[0] = 0;
+    z[0] = -1e20f;
+    z[1] = 1e20f;
+    f[0] = grid[offset];
+    for (int q = 1, k = 0; q < length; q++) {
+        f[q] = grid[offset + q * stride];
+        float q2 = (float)q * q;
+        float s;
+        do {
+            int r = v[k];
+            s = (f[q] - f[r] + q2 - (float)r * r) / (float)(q - r) / 2.0f;
+        } while (s <= z[k] && --k > -1);
+        k++;
+        v[k] = q;
+        z[k] = s;
+        z[k + 1] = 1e20f;
+    }
+    for (int q = 0, k = 0; q < length; q++) {
+        while (z[k + 1] < q) k++;
+        int r = v[k];
+        float qr = (float)(q - r);
+        grid[offset + q * stride] = f[r] + qr * qr;
+    }
+}
+
+static void edt(float *grid, int w, int h, float *f, int *v, float *z) {
+    for (int x = 0; x < w; x++) edt_1d(grid, x, w, h, f, v, z);
+    for (int y = 0; y < h; y++) edt_1d(grid, y * w, 1, w, f, v, z);
+}
+
+/* The glyph's signed distance field, as stbtt_GetGlyphSDF makes it (the
+   same box, `padding` pixels round the glyph's bitmap, and the same values:
+   on_edge on the outline, dist_scale more per pixel inside), but made from
+   the glyph's antialiased coverage and a distance transform in linear time,
+   as Mapbox's TinySDF does, rather than by measuring every pixel against
+   every edge of the outline, which costs milliseconds a glyph. A partly
+   covered pixel places the edge within it by its coverage. */
 uint8_t gs_gfx2d_glyph_sdf(gs_gfx2d_font f, int32_t glyph, float scale, int32_t padding,
                            uint8_t on_edge, float dist_scale, gs_gfx2d_out_bytes out,
                            gs_gfx2d_glyph_bitmap *info) {
     memset(info, 0, sizeof *info);
     font_slot *s = font_get(f);
     if (!s) return 0;
-    int w = 0, h = 0, xoff = 0, yoff = 0;
-    unsigned char *sdf = stbtt_GetGlyphSDF(&s->info, scale, glyph, padding, on_edge, dist_scale,
-                                           &w, &h, &xoff, &yoff);
+    int x0, y0, x1, y1;
+    stbtt_GetGlyphBitmapBox(&s->info, glyph, scale, scale, &x0, &y0, &x1, &y1);
+    int gw = x1 - x0, gh = y1 - y0;
+    if (gw <= 0 || gh <= 0) return 1;   /* nothing to draw, as for a space */
+    int w = gw + 2 * padding, h = gh + 2 * padding;
     info->w = w;
     info->h = h;
-    info->xoff = xoff;
-    info->yoff = yoff;
-    if (!sdf) return 1;                 /* nothing to draw, as for a space */
+    info->xoff = x0 - padding;
+    info->yoff = y0 - padding;
     /* Too small a buffer: the size is in info, and nothing is written. */
-    if ((int64_t)w * h > out.len) {
-        stbtt_FreeSDF(sdf, NULL);
-        return 0;
+    if ((int64_t)w * h > out.len) return 0;
+
+    size_t n = (size_t)w * h;
+    int longest = w > h ? w : h;
+    unsigned char *coverage = (unsigned char *)calloc((size_t)gw * gh, 1);
+    float *outer = (float *)malloc(n * sizeof(float));
+    float *inner = (float *)malloc(n * sizeof(float));
+    float *fs = (float *)malloc((size_t)(longest + 1) * sizeof(float));
+    float *zs = (float *)malloc((size_t)(longest + 2) * sizeof(float));
+    int *vs = (int *)malloc((size_t)(longest + 1) * sizeof(int));
+    uint8_t ok = coverage && outer && inner && fs && zs && vs;
+    if (ok) {
+        stbtt_MakeGlyphBitmap(&s->info, coverage, gw, gh, gw, scale, scale, glyph);
+        /* Squared distances to the nearest pixel inside (outer) and outside
+           (inner): 0 there, unknown (huge) elsewhere, and a partly covered
+           pixel's edge half a pixel from its center less its coverage. */
+        for (size_t i = 0; i < n; i++) {
+            outer[i] = 1e20f;
+            inner[i] = 0.0f;
+        }
+        for (int y = 0; y < gh; y++) {
+            for (int x = 0; x < gw; x++) {
+                float a = coverage[y * gw + x] / 255.0f;
+                if (a == 0.0f) continue;
+                size_t j = (size_t)(y + padding) * w + x + padding;
+                if (a == 1.0f) {
+                    outer[j] = 0.0f;
+                    inner[j] = 1e20f;
+                } else {
+                    float d = 0.5f - a;
+                    outer[j] = d > 0 ? d * d : 0.0f;
+                    inner[j] = d < 0 ? d * d : 0.0f;
+                }
+            }
+        }
+        edt(outer, w, h, fs, vs, zs);
+        edt(inner, w, h, fs, vs, zs);
+        for (size_t i = 0; i < n; i++) {
+            /* Positive outside. */
+            float d = sqrtf(outer[i]) - sqrtf(inner[i]);
+            float v = (float)on_edge - d * dist_scale;
+            out.data[i] = (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : v + 0.5f);
+        }
     }
-    memcpy(out.data, sdf, (size_t)w * h);
-    stbtt_FreeSDF(sdf, NULL);
-    return 1;
+    free(coverage);
+    free(outer);
+    free(inner);
+    free(fs);
+    free(zs);
+    free(vs);
+    return ok;
 }

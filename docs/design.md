@@ -359,8 +359,14 @@ Goose's namespaces design leaves for later).
   from 1 to 0 across the true edge. That gives exact coverage, as nanovg
   does. Any other fill (holes, self-intersection, several contours) is cut
   into horizontal bands at every vertex's y and every crossing. Within a
-  band, sorted by x at its middle, the fill rule picks the spans, each
-  emitted as a trapezoid. The trapezoids tile the fill exactly, and an
+  band, sorted by x at its middle, the fill rule picks the spans. A span
+  bounded by the same two edges as one in the band above continues that
+  span's trapezoid, so a trapezoid is emitted only when its edges change,
+  and the output is close to linear in the outline's size. (Without that,
+  a 5,000-point outline made 500,000 triangles; with it, 20,000.) The
+  sweep has a work budget: a path that crosses itself millions of times
+  is drawn in part, with a warning, instead of taking minutes or running
+  out of memory. The trapezoids tile the fill exactly, and an
   outward fringe half a pixel wide (alpha ½ to 0) is added along each
   contour on the side away from the fill. The side is found by testing
   the winding number just beside one edge. So these fills come out about
@@ -372,6 +378,15 @@ Goose's namespaces design leaves for later).
     one, and fills them by `NONZERO`. A stroke that crosses itself is
     drawn once where it overlaps, so translucent strokes don't darken
     there.
+  * A stroke longer than 16 segments is outlined in pieces of about 16,
+    each tessellated alone. One outline that long makes the band sweep's
+    work grow with the square of its length: a 1,000-point chart line
+    took seconds. Pieces meet across the middle of a segment, the longest
+    in the second half of the piece, where both have the same butt end,
+    so they leave no gap, and the edges there get no fringe. They also
+    don't overlap unless even that segment is shorter than about the
+    stroke's width, so that a join beside the cut reaches across it. Only
+    a translucent stroke shows that, as small darker spots.
   * Joins can be `MITER` (falling back to bevel past the limit), `ROUND`
     or `BEVEL`. On the inner side of a join, the outline uses the point
     where the two sides meet, and pivots through the vertex only when that
@@ -728,8 +743,13 @@ flicker that sub-pixel strokes cause.
   default font needs no file at run time. The license names no Reserved
   Font Name, so the subset keeps Inter's name.
 * **Rendering uses SDF glyphs.**
-  * The C layer rasterizes each glyph once with `stbtt_GetGlyphSDF`, at a
-    48 px em with a 6 px spread.
+  * The C layer rasterizes each glyph once, at a 48 px em with a 6 px
+    spread. It renders the glyph's coverage with stb_truetype's scanline
+    rasterizer, then runs a linear-time Euclidean distance transform
+    (Felzenszwalb), placing the edge within partly covered pixels by
+    their coverage, as Mapbox's TinySDF does. That takes about 0.15 ms a
+    glyph, where `stbtt_GetGlyphSDF`, which measures every pixel against
+    every edge, took about 2 ms, with the same geometry and values.
   * `text.goose` packs the glyphs into a shelf-packed R8 atlas, 1024 px
     wide and growing taller to 4096 px. The atlas starts over if it
     fills, and only changed rows are uploaded.

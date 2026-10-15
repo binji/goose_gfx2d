@@ -210,6 +210,55 @@ fn main() {
     gfx2d::line_to(dot, 5, 5);
     check("dot", stroke_area(dot, 5, gfx2d::JOIN_MITER, 1, []), PI * 25, 0.5);
 
+    // A long stroke is outlined in pieces, each tessellated alone, cut across
+    // the middle of segments so that together they cover the stroke exactly
+    // once.
+    fn pieces_and_union(p: const gfx2d::Path&, half: f32, join: i64) -> i64, f64, f64 {
+        var zpts: float2[>..<] = [];
+        var zcs: gfx2d::Contour[>..<] = [];
+        gfx2d::flatten(p, gfx2d::IDENTITY, 0.01, zpts, zcs);
+        var opts: float2[>..<] = [];
+        var ocs: gfx2d::Contour[>..<] = [];
+        gfx2d::stroke_outline(zpts, zcs, half, join, 0, 4, 0.01, opts, ocs);
+        var pieces = 0.0;
+        var groups = 0;
+        var a = 0;
+        while a < ocs.len {
+            var b = a + 1;
+            while b < ocs.len && ocs[b].group == ocs[a].group { b++; }
+            var v: gfx2d::TessVertex[>..<] = [];
+            var idx: u32[>..<] = [];
+            gfx2d::fill_triangles(opts, ocs[a..b], gfx2d::NONZERO, 0, v, idx);
+            pieces += covered(v, idx);
+            groups++;
+            a = b;
+        }
+        var all_v: gfx2d::TessVertex[>..<] = [];
+        var all_idx: u32[>..<] = [];
+        gfx2d::fill_triangles(opts, ocs, gfx2d::NONZERO, 0, all_v, all_idx);
+        return groups, pieces, covered(all_v, all_idx);
+    }
+    var zig = gfx2d::Path {};
+    for i in 101 {
+        let y = if i % 2 == 0 { 0.0 } else { 20.0 };
+        if i == 0 { gfx2d::move_to(zig, 0, y); } else { gfx2d::line_to(zig, i * 10, y); }
+    }
+    let groups, pieces, union = pieces_and_union(zig, 2, gfx2d::JOIN_MITER);
+    print("zigzag in pieces: ", groups, " groups; no overlap ", abs(pieces - union) < 0.01,
+          ", union ", abs(union - 100 * sqrt(500.0) * 4) < 40);
+    var wave = gfx2d::Path {};
+    for i in 101 {
+        let y = 20 * sin(i * 0.3);
+        if i == 0 { gfx2d::move_to(wave, 0, y); } else { gfx2d::line_to(wave, i * 10, y); }
+    }
+    let wgroups, wpieces, wunion = pieces_and_union(wave, 3, gfx2d::JOIN_MITER);
+    print("wave in pieces: ", wgroups, " groups; no overlap ", abs(wpieces - wunion) < 0.01);
+    var ring = gfx2d::Path {};
+    gfx2d::circle(ring, 0, 0, 100);
+    let rgroups, rpieces, runion = pieces_and_union(ring, 5, gfx2d::JOIN_ROUND);
+    print("circle in pieces: ", rgroups > 2, " groups; no overlap ", abs(rpieces - runion) < 0.01,
+          ", the ring's area ", abs(runion - PI * (105 * 105 - 95 * 95)) < 1);
+
     // transform() moves every point.
     var moved = gfx2d::Path {};
     gfx2d::rect(moved, 0, 0, 10, 10);

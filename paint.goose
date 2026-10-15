@@ -216,12 +216,39 @@ fn gradient_at(g: Gradient, t: f32) -> Color {
 // filtering between texels does not darken where alpha changes), texel i
 // the color at i / (RAMP_WIDTH - 1).
 fn append_ramp(g: Gradient, out: u8[>..<]&) {
+    fn byte(x: f32) -> u8 { (saturate(x) * 255.0 + 0.5) as u8 }
+    let n = g.stops.len;
+    if g.space != INTERPOLATE_SRGB || n == 0 {
+        for i in RAMP_WIDTH {
+            let c = premultiplied(gradient_at(g, i / (RAMP_WIDTH - 1.0)));
+            out.append([byte(c.x), byte(c.y), byte(c.z), byte(c.w)]);
+        }
+        return;
+    }
+    // In sRGB's encoding, premultiplied, a ramp is straight lines between
+    // its stops' premultiplied colors: walked once, as gradient_at would
+    // find them.
+    var off: f32[16] = [0.0; 16];
+    var pm: float4[16] = [float4_0; 16];
+    for st, i in g.stops {
+        off[i] = if i > 0 { max(st.offset, off[i - 1]) } else { st.offset };
+        pm[i] = premultiplied(st.color);
+    }
+    var j = 1;
     for i in RAMP_WIDTH {
-        let c = premultiplied(gradient_at(g, i / (RAMP_WIDTH - 1.0)));
-        out.push(round(saturate(c.x) * 255.0) as u8);
-        out.push(round(saturate(c.y) * 255.0) as u8);
-        out.push(round(saturate(c.z) * 255.0) as u8);
-        out.push(round(saturate(c.w) * 255.0) as u8);
+        let t: f32 = i / (RAMP_WIDTH - 1.0);
+        var c = pm[n - 1];
+        if t <= off[0] {
+            c = pm[0];
+        } else {
+            while j < n && t > off[j] { j++; }
+            if j < n {
+                let span = off[j] - off[j - 1];
+                let k = if span > 0.0 { (t - off[j - 1]) / span } else { 1.0 };
+                c = lerp(pm[j - 1], pm[j], k);
+            }
+        }
+        out.append([byte(c.x), byte(c.y), byte(c.z), byte(c.w)]);
     }
 }
 

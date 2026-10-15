@@ -23,7 +23,7 @@
 // varies between frames is the timing only.
 //
 // Output lines are `case <name> <frames> <record> <end> <gpu> <instances>
-// <triangles> <draws>`, for run_bench.py, after a table for people.
+// <triangles> <draws> <bytes uploaded>`, for run_bench.py.
 
 import std;
 import vec;
@@ -104,7 +104,7 @@ fn run<F>(name: const u8[:]) {
     let e = median(end);
     let g = median(gpu);
     print("case ", name, " ", frames, " ", ms(r), " ", ms(e), " ", ms(g), " ", s.instances, " ",
-          s.triangles, " ", s.draws);
+          s.triangles, " ", s.draws, " ", s.bytes);
 }
 
 // --- shapes ------------------------------------------------------------------------

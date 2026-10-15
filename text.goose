@@ -423,9 +423,14 @@ fn line_width(s: const u8[:], from: i64, to: i64, style: TextStyle) -> f64 {
 
 // The lines of s as `style` breaks them: F(from, to) for each, in order.
 // Newlines end lines; with a wrap width, so does the last space before a
-// line would be wider. A word wider than the wrap width has a line of its
-// own and is not broken.
+// line would be wider, and the spaces there are on neither line. A word
+// wider than the wrap width has a line of its own and is not broken.
+//
+// Each word is measured once, and a line's width summed from its words and
+// the spaces between them; that leaves out kerning across the spaces, so a
+// line that comes within a margin of the wrap width is measured whole.
 fn each_line<F>(s: const u8[:], style: TextStyle) {
+    let margin = style.size * 0.1 + 2.0;
     var start = 0;
     while start <= s.len {
         var end = start;
@@ -433,26 +438,34 @@ fn each_line<F>(s: const u8[:], style: TextStyle) {
         if style.wrap_width <= 0.0 {
             F(start, end);
         } else {
-            var a = start;
+            var a = start;          // the line's start
+            var fit = -1;           // the end of its last word, -1 before its first
+            var w = 0.0;            // the width of s[a..fit], near enough
+            var j = start;
             loop {
-                // As many words from a as fit.
-                var fit = -1;
-                var j = a;
-                while j <= end {
-                    if j == end || s[j] == ' ' {
-                        if fit < 0 || line_width(s, a, j, style) <= style.wrap_width { fit = j; }
-                        else { break; }
-                    }
-                    if j == end { break; }
-                    j++;
+                var ws = j;
+                while ws < end && s[ws] == ' ' { ws++; }
+                if ws >= end { break; }
+                var we = ws;
+                while we < end && s[we] != ' ' { we++; }
+                // Each piece's width less the letter spacing after its last
+                // character, which the line has.
+                let gap_from = if fit < 0 { a } else { fit };
+                let gap = if ws > gap_from { line_width(s, gap_from, ws, style) + style.letter_spacing } else { 0.0 };
+                let ww = line_width(s, ws, we, style);
+                let wider = w + gap + ww;
+                if fit >= 0 && wider > style.wrap_width - margin &&
+                   (wider > style.wrap_width + margin || line_width(s, a, we, style) > style.wrap_width) {
+                    F(a, fit);
+                    a = ws;
+                    w = ww;
+                } else {
+                    w = wider;
                 }
-                if fit < 0 { fit = end; }
-                F(a, fit);
-                if fit >= end { break; }
-                a = fit;
-                while a < end && s[a] == ' ' { a++; }
-                if a >= end { break; }
+                fit = we;
+                j = we;
             }
+            F(a, if fit < 0 { end } else { fit });
         }
         start = end + 1;
     }

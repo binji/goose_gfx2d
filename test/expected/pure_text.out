@@ -11,6 +11,7 @@ letter spacing adds 4 x 2: 8.0
 empty: vec2<f32> { 0.0, 38.71875 }
 wrapped: 4 lines: ["the quick", "brown fox", "jumps over", "the lazy dog"]
 each fits: true; measured height 77.44 = 4 x 19.36
+long paragraph: 80 lines, each full and fitting true
 a word wider than the wrap: line lengths 1 20 1 
 fallback: true, resolved in itself, true
 missing everywhere: .notdef of the first, true
