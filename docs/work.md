@@ -6,6 +6,10 @@ bugs first, then the costs the benchmarks (`bench/results.md`) point at,
 then the API and packaging. Each item says what is wrong, what to change,
 and how to check it. Strike items out as they land.
 
+All twenty have landed, one commit each, with what was measured noted
+under each; what is left over is under items 7 and 13 (the per-paint
+record cost that remains, and the driver's cost per texture change).
+
 ## Bugs
 
 1. ~~**The glyph atlas overflow corrupts the frame it happens in.**~~ Done. When
