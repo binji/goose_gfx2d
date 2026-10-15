@@ -26,7 +26,7 @@ void main() {
         // The color alone, unclipped: a flat (per primitive) and a uniform.
         c = vec4(v_color.rgb * v_color.a, v_color.a);
     } else {
-        c = paint_color(paints[v_paint], v_color, v_user, gl_FragCoord.xy, ramp, image)
+        c = paint_color(paints[v_paint], v_color, v_user, v_user, gl_FragCoord.xy, ramp, image)
             * clip_coverage(clip, gl_FragCoord.xy);
     }
     result = blend_out(c, blend);

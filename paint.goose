@@ -75,6 +75,8 @@ let BLEND_REPLACE = 3;      // written as it is, alpha too; hard edges
 // Paint.space.
 let SPACE_LOCAL = 0;        // the space the shape is drawn in
 let SPACE_SCREEN = 1;       // the target's pixels
+let SPACE_SHAPE = 2;        // the shape's own: its center the origin, unscaled (image() uses it, so that
+                            // sprites of one size share a paint record); a path or mesh takes it as LOCAL
 
 let MAX_STOPS = 16;
 

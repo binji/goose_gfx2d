@@ -101,7 +101,9 @@ shape's distance function, and outlines are centered on the edge.
 `tint` is a `Color`, which multiplies the image, or a `Paint`: its color
 or gradient multiplies the image, and its blend mode and opacity apply
 (`image(tex, x, y, with_blend(solid(WHITE), BLEND_ADD))`); the paint's own
-image is replaced, and its space is local. `filter` defaults to
+image is replaced, and its space is local (a `Color` tint draws in the
+shape's own space, so that every image of one size from one part of a
+texture is one paint record, wherever it is). `filter` defaults to
 `FILTER_LINEAR`, or `FILTER_NEAREST` with anti-aliasing off.
 
 ### Paints (`paint.goose`)
@@ -117,7 +119,7 @@ struct Paint { color, gradient: Gradient, image: Image, image_mode, opacity, ble
 | `image_pattern(tex, placement, wrap, filter)` | an image placed by an `Affine`, wrapping `CLAMP`, `REPEAT`, `MIRROR` or `DECAL` |
 | `image_mode` | how the image combines with the color or gradient: `IMAGE_MULTIPLY` (the default), `REPLACE`, `ADD`, `MASK` |
 | `blend` | `BLEND_NORMAL`, `ADD`, `MULTIPLY`, `REPLACE`; other modes need a layer |
-| `space` | `SPACE_LOCAL`, which moves with the shape, or `SPACE_SCREEN` |
+| `space` | `SPACE_LOCAL`, which moves with the shape, `SPACE_SCREEN`, or `SPACE_SHAPE`: the shape's own, its center the origin and unscaled (a path or mesh takes it as `LOCAL`) |
 | `with_opacity(p, o)`, `with_blend(p, b)` | a changed copy |
 
 ### Paths (`path.goose`)

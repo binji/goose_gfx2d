@@ -92,6 +92,7 @@ struct PaintGPU {
 
 let IMAGE_NONE: u32 = 255;
 let PAINT_SCREEN: u32 = 1;
+let PAINT_SHAPE: u32 = 2;
 let INSTANCE_SIZE = 112;
 let PAINT_SIZE = 96;
 
@@ -756,43 +757,41 @@ fn ramp_hash(g: Gradient) -> u64 {
 // p's index in the frame's paints, added unless it is the last one added;
 // `row` is its gradient's in the ramp atlas, or -1 for none (the atlas
 // full), which leaves the gradient out.
-fn paint_index(p: Paint, row: i64) -> u32 {
-    let g = p.gradient;
+fn paint_index(p: const Paint&, row: i64) -> u32 {
     var gpu = PaintGPU {
-        kind: g.kind as u32,
-        spread: g.spread as u32,
+        kind: p.gradient.kind as u32,
+        spread: p.gradient.spread as u32,
         image_mode: IMAGE_NONE,
-        flags: if p.space == SPACE_SCREEN { PAINT_SCREEN } else { 0 },
-        g1: float4 { g.radius, 0.0, 0.0, p.opacity },
+        flags: if p.space == SPACE_SCREEN { PAINT_SCREEN } else if p.space == SPACE_SHAPE { PAINT_SHAPE } else { 0 },
+        g1: float4 { p.gradient.radius, 0.0, 0.0, p.opacity },
         ..
     };
-    if g.kind != GRADIENT_NONE {
+    if p.gradient.kind != GRADIENT_NONE {
         if row < 0 { gpu.kind = GRADIENT_NONE as u32; }
         gpu.g1.z = max(row, 0);
-        if g.kind == GRADIENT_LINEAR {
-            gpu.g0 = float4 { g.p0.x, g.p0.y, g.p1.x, g.p1.y };
-        } else if g.kind == GRADIENT_RADIAL {
+        if p.gradient.kind == GRADIENT_LINEAR {
+            gpu.g0 = float4 { p.gradient.p0.x, p.gradient.p0.y, p.gradient.p1.x, p.gradient.p1.y };
+        } else if p.gradient.kind == GRADIENT_RADIAL {
             // The focal point inside the circle, where the gradient is
             // defined everywhere.
-            var f = g.p1;
-            let off = f - g.p0;
+            var f = p.gradient.p1;
+            let off = f - p.gradient.p0;
             let d = length(off);
-            if d > g.radius * 0.99 && d > 0.0 { f = g.p0 + off * (g.radius * 0.99 / d); }
-            gpu.g0 = float4 { g.p0.x, g.p0.y, f.x, f.y };
+            if d > p.gradient.radius * 0.99 && d > 0.0 { f = p.gradient.p0 + off * (p.gradient.radius * 0.99 / d); }
+            gpu.g0 = float4 { p.gradient.p0.x, p.gradient.p0.y, f.x, f.y };
         } else {
-            gpu.g0 = float4 { g.p0.x, g.p0.y, g.angle, 0.0 };
+            gpu.g0 = float4 { p.gradient.p0.x, p.gradient.p0.y, p.gradient.angle, 0.0 };
         }
     }
-    let img = p.image;
-    if img.texture.id != 0 {
-        let inv, ok = invert(img.placement);
+    if p.image.texture.id != 0 {
+        let inv, ok = invert(p.image.placement);
         if ok {
             gpu.image_mode = p.image_mode as u32;
-            gpu.flags |= ((img.wrap as u32) & 3) << 4;
+            gpu.flags |= ((p.image.wrap as u32) & 3) << 4;
             gpu.im = float4 { inv.a, inv.b, inv.c, inv.d };
-            let part = img.src.w != 0.0 && img.src.h != 0.0;
+            let part = p.image.src.w != 0.0 && p.image.src.h != 0.0;
             gpu.it = float4 { inv.tx, inv.ty, if part { 1.0 } else { 0.0 }, 0.0 };
-            gpu.src = float4 { img.src.x, img.src.y, img.src.w, img.src.h };
+            gpu.src = float4 { p.image.src.x, p.image.src.y, p.image.src.w, p.image.src.h };
         } else {
             // Placed with no area: none of it shows.
             gpu.g1.w = 0.0;
@@ -850,8 +849,8 @@ fn paint_key(c: Color) -> PaintKey {
     PaintKey { color: to_float4(c), paint: 0, blend: BLEND_NORMAL, texture: gfx::Texture { 0 },
                sampler: 2 }
 }
-fn paint_key(p: Paint) -> PaintKey {
-    let img = p.image;
+fn paint_key(p: const Paint&) -> PaintKey {
+    let img .= p.image;
     let has_image = img.texture.id != 0;
     let wrap = if img.wrap == WRAP_REPEAT { 0 } else if img.wrap == WRAP_MIRROR { 1 } else { 2 };
     let sampler = (if img.filter == FILTER_NEAREST { 3 } else { 0 }) + wrap;
@@ -1256,25 +1255,31 @@ fn image(t: gfx::Texture, dst: Rect, src: Rect, tint: Paint, filter: i64 = FILTE
 // drawn with when a call does not say.
 let FILTER_DEFAULT = -1;
 
-// The paint an image is drawn with: the tint's, with the image in it.
-fn image_paint(img: Image, tint: Color) -> Paint { Paint { color: tint, image: img } }
-fn image_paint(img: Image, tint: Paint) -> Paint {
+// The paint an image is drawn with over dst: the tint's, with the image
+// in it. A Color tint places the image in the shape's own space (the
+// box's center at the origin), so that every image of this size from this
+// part of the texture is one paint record, wherever it is drawn. A Paint
+// tint keeps the space the shape is drawn in, where its gradient is.
+fn placed_image(t: gfx::Texture, src: Rect, part: bool, filter: i64, placement: Affine) -> Image {
+    Image { texture: t, placement: placement, src: if part { src } else { Rect { 0.0, 0.0, 0.0, 0.0 } },
+            wrap: WRAP_CLAMP, filter: filter as i32 }
+}
+fn image_paint(t: gfx::Texture, dst: Rect, src: Rect, part: bool, filter: i64, tint: Color) -> Paint {
+    let placement = Affine { dst.w / src.w, 0.0, 0.0, dst.h / src.h, -dst.w * 0.5, -dst.h * 0.5 };
+    Paint { color: tint, image: placed_image(t, src, part, filter, placement), space: SPACE_SHAPE }
+}
+fn image_paint(t: gfx::Texture, dst: Rect, src: Rect, part: bool, filter: i64, tint: Paint) -> Paint {
     var p = tint;
-    p.image = img;
+    p.image = placed_image(t, src, part, filter, Affine { dst.w / src.w, 0.0, 0.0, dst.h / src.h, dst.x, dst.y });
     p.space = SPACE_LOCAL;
     p
 }
-
 fn draw_image(t: gfx::Texture, dst: Rect, src: Rect, part: bool, tint, chosen: i64, hard: u32) {
     let filter = if chosen != FILTER_DEFAULT { chosen } else if state.aliased { FILTER_NEAREST }
                  else { FILTER_LINEAR };
     guard src.w != 0.0 && src.h != 0.0 else { return; }
-    let placement = Affine { dst.w / src.w, 0.0, 0.0, dst.h / src.h, dst.x, dst.y };
-    let img = Image { texture: t, placement: placement,
-                      src: if part { src } else { Rect { 0.0, 0.0, 0.0, 0.0 } },
-                      wrap: WRAP_CLAMP, filter: filter as i32 };
     add(KIND_RECT, hard, box_at(dst.x, dst.y, dst.w, dst.h), box_geom(dst.w, dst.h, 0.0),
-        no_radii(), image_paint(img, tint));
+        no_radii(), image_paint(t, dst, src, part, filter, tint));
 }
 
 // A nine-slice (nine-patch): `src`, a part of the texture, cut by `insets`

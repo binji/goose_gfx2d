@@ -5,7 +5,7 @@ struct Paint {
     uint kind;          // GRADIENT_*: 0, the instance's color alone
     uint spread;        // SPREAD_*
     uint image_mode;    // IMAGE_*, or IMAGE_NONE
-    uint flags;         // PAINT_SCREEN, and the image's WRAP_* << 4
+    uint flags;         // PAINT_SCREEN or PAINT_SHAPE, and the image's WRAP_* << 4
     vec4 g0;            // linear: p0, p1; radial: center, focal point; conic: center, angle
     vec4 g1;            // radial: radius; z: the ramp's row; w: opacity
     vec4 im;            // the paint's space to the image's pixels: a, b, c, d
@@ -30,6 +30,7 @@ const uint WRAP_REPEAT = 1u;
 const uint WRAP_MIRROR = 2u;
 const uint WRAP_DECAL = 3u;
 const uint PAINT_SCREEN = 1u;
+const uint PAINT_SHAPE = 2u;
 
 const float TAU = 6.283185307179586;
 
@@ -93,9 +94,10 @@ vec4 image_at(Paint g, vec2 p, sampler2D image) {
 }
 
 // The painted color, premultiplied, before coverage. `user` is the point in
-// the space the shape was drawn in, `pixel` in the target.
-vec4 paint_color(Paint g, vec4 tint, vec2 user, vec2 pixel, sampler2D ramp, sampler2D image) {
-    vec2 p = (g.flags & PAINT_SCREEN) != 0u ? pixel : user;
+// the space the shape was drawn in, `local` in the shape's own (its center
+// the origin; a mesh has none, and passes `user`), `pixel` in the target.
+vec4 paint_color(Paint g, vec4 tint, vec2 user, vec2 local, vec2 pixel, sampler2D ramp, sampler2D image) {
+    vec2 p = (g.flags & PAINT_SCREEN) != 0u ? pixel : (g.flags & PAINT_SHAPE) != 0u ? local : user;
     vec4 c = vec4(tint.rgb * tint.a, tint.a);
     if (g.kind != GRADIENT_NONE) {
         float t = spread(g.spread, gradient_t(g, p));

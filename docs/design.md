@@ -236,7 +236,8 @@ struct Paint {
     image_mode: i32 = 0,              // IMAGE_MULTIPLY; also REPLACE, ADD, MASK
     opacity: f32 = 1.0,
     blend: i32 = 0,                   // BLEND_NORMAL, ADD, MULTIPLY, REPLACE
-    space: i32 = 0,                   // SPACE_LOCAL: moves with the shape; or SPACE_SCREEN
+    space: i32 = 0,                   // SPACE_LOCAL: moves with the shape; SPACE_SCREEN; or
+                                      // SPACE_SHAPE: the shape's own space, its center the origin
 }
 ```
 

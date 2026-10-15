@@ -94,7 +94,7 @@ void main() {
         // primitive, and the derivatives the image's sampling takes stay
         // defined.
         coverage *= clip_coverage(v_clip, gl_FragCoord.xy);
-        c = paint_color(paints[v_paint], v_color, v_user, gl_FragCoord.xy, ramp, image) * coverage;
+        c = paint_color(paints[v_paint], v_color, v_user, v_local, gl_FragCoord.xy, ramp, image) * coverage;
     }
     result = blend_out(c, blend);
 }

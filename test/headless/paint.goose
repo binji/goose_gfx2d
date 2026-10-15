@@ -208,8 +208,9 @@ fn main() {
 
     // Sharing: one paint for many shapes, one ramp for one gradient's
     // stops wherever it is (and none baked again the next frame, since
-    // ramps are kept), one draw while only solid shapes come between
-    // images of one texture.
+    // ramps are kept), one paint for images of one size wherever they
+    // are, one draw while only solid shapes come between images of one
+    // texture.
     gfx2d::reset_ramps();
     fn sharing() {
         let p = gfx2d::radial(0, 0, 10, white, black);

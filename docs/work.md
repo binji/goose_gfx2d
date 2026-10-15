@@ -84,7 +84,12 @@ and how to check it. Strike items out as they land.
    build before guessing again. (Item 13's profile of `sprites_alternating`:
    `paint_key`'s own instructions, with what is inlined into it, are 4.7%
    of the process, against 6% for the benchmark's loop around 2,000
-   `image()` calls; annotate that function next.)
+   `image()` calls. Item 16 annotated it: the hottest instruction was the
+   copy of the 440-byte `Paint` into `paint_index`, and `add` and
+   `draw_image`, which build and copy one too, were 11% and 12%; the
+   internal copies are gone, and what remains is `add`'s by-value `c`,
+   which a temporary from the user needs, and the hash of the 96-byte
+   record.)
 
 8. ~~**Every stroke is outlined and filled by the nonzero sweep.**~~ Done
    (`stroke_triangles`; `pixels` strokes take the same path). That is
@@ -184,7 +189,19 @@ and how to check it. Strike items out as they land.
     contours whose bounds contain the test point. *Check:* `pure_path`
     unchanged; a path of 2,000 small contours timed.
 
-16. **`image()` asks `gfx` for the texture's size on every call.**
+16. ~~**`image()` asks `gfx` for the texture's size on every call.**~~
+    Done, otherwise than written: `texture_info` is 0.04% of the `sprites`
+    profile, so no cache. What an image costs is its paint record, one a
+    sprite, since the placement held the sprite's position. A `Color`
+    tint now places the image in the shape's own space (`SPACE_SHAPE`, a
+    third paint space: the box's center the origin), so every image of a
+    size from a part of a texture is one record: `sprites` uploads 1.1 MB
+    a frame instead of 2.1 and its `end` falls from 3.0-3.4 ms to 2.0;
+    record 8.6-10.1 to 8.5-8.9, with `paint_key` and `paint_index` taking
+    the `Paint` by reference and not copying its gradient (a `Paint` is
+    440 bytes, mostly the 16 stops, and copying it was the hottest
+    instruction of `paint_key`). A `Paint` tint keeps the drawing space,
+    where its gradient is.
     `texture_rect` calls `texture_info` per image; `sprites` draws 10,000.
     (The AOT profile under item 13 puts `gs_gfx_texture_info` at 0.04% of
     `sprites_alternating`, and `paint_key`'s own code at 4.7%, the
