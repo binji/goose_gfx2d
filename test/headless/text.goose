@@ -58,6 +58,14 @@ fn main() {
         gfx2d::text(246, 10, "right", gfx2d::TextStyle { size: 24, align: gfx2d::ALIGN_RIGHT }, black);
     };
     print("right-aligned: ", abs(rb.z - 246) <= 3);
+    // With a wrap width, aligned within the box from x to x + wrap_width.
+    let wc, wcn = ink() {
+        gfx2d::text(20, 10, "aa bb", gfx2d::TextStyle { size: 24, align: gfx2d::ALIGN_CENTER, wrap_width: 200 }, black);
+    };
+    let wr, wrn = ink() {
+        gfx2d::text(20, 10, "aa bb", gfx2d::TextStyle { size: 24, align: gfx2d::ALIGN_RIGHT, wrap_width: 200 }, black);
+    };
+    print("in the wrap box: centered ", abs((wc.x + wc.z) / 2.0 - 120) <= 2, ", right-aligned ", abs(wr.z - 220) <= 3);
 
     // Baselines: at the alphabetic baseline, letters without descenders sit
     // just above y; at the middle, the ink straddles it; at the bottom, it is

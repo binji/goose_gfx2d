@@ -145,7 +145,7 @@ fn main() {
     gfx2d::polygon(bow, [float2 { 0, 0 }, float2 { 100, 100 }, float2 { 100, 0 }, float2 { 0, 100 }]);
     check("bow tie", fill_area(bow, gfx2d::NONZERO, 0), 5000, 0.01);
     var starred = gfx2d::Path {};
-    gfx2d::star(starred, 0, 0, 5, 50, 20);
+    gfx2d::star(starred, 0, 0, 50, 20, 5);
     check("star()", fill_area(starred, gfx2d::NONZERO, 0), 5 * 50 * 20 * sin(PI / 5), 0.01);
     var hexagon = gfx2d::Path {};
     gfx2d::regular_polygon(hexagon, 0, 0, 10, 6);

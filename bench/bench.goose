@@ -215,7 +215,7 @@ fn path_fills() {
     seed(8);
     for i in 1000 {
         var p = gfx2d::Path {};
-        gfx2d::star(p, rand(0, W), rand(0, H), 5, rand(10, 40), rand(4, 15));
+        gfx2d::star(p, rand(0, W), rand(0, H), rand(10, 40), rand(4, 15), 5);
         gfx2d::fill(p, rand_color());
         var c = gfx2d::Path {};
         gfx2d::circle(c, rand(0, W), rand(0, H), rand(5, 40));
@@ -393,7 +393,7 @@ fn path_clips() {
         var p = gfx2d::Path {};
         let x = rand(100, W - 100);
         let y = rand(100, H - 100);
-        gfx2d::star(p, x, y, 5, 90, 40);
+        gfx2d::star(p, x, y, 90, 40, 5);
         gfx2d::clip_path(p) {
             for i in 50 { gfx2d::rect(x - 100 + i * 4, y - 100, 2, 200, rand_color()); }
         };
@@ -484,7 +484,7 @@ fn ui_scene() {
                 gfx2d::text(bx + 25, y + 140, "OK", gfx2d::TextStyle { size: 13, align: gfx2d::ALIGN_CENTER }, gfx2d::BLACK);
             }
             gfx2d::text(x + 12, y + 36, "Value: 42.0", label, gfx2d::BLACK);
-            gfx2d::star(x + 160, y + 44, 5, 8, 3.5, gfx2d::ORANGE);
+            gfx2d::star(x + 160, y + 44, 8, 3.5, 5, gfx2d::ORANGE);
             var pts: float2[16] = [float2_0; 16];
             for k in 16 { pts[k] = float2 { (x + 12 + k * 10.5) as f32, (y + 100 - rand(0, 40)) as f32 }; }
             gfx2d::polyline(pts, 1.5, gfx2d::rgb(0x2E4A75), gfx2d::CAP_ROUND, gfx2d::JOIN_ROUND);

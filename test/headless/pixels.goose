@@ -45,7 +45,7 @@ fn main() {
         gfx2d::antialias(false) {
             gfx2d::circle(40.3, 40.7, 25, white);
             gfx2d::text(4, 80, "Pixels!", 24, white);
-            gfx2d::star(100, 100, 5, 25, 10, white);
+            gfx2d::star(100, 100, 25, 10, 5, white);
             gfx2d::translate(100, 30) { gfx2d::rotate(0.4) { gfx2d::rounded_rect(-15, -10, 30, 20, 5, white); }; };
         };
     };

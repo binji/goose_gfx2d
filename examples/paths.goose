@@ -119,7 +119,7 @@ fn main() {
                 gfx2d::translate(80 + k * 90, 470) {
                     gfx2d::rotate(t * (k + 1) * 0.3) {
                         if k % 2 == 0 { gfx2d::regular_polygon(0, 0, 35, k + 3, accents[k]); }
-                        else { gfx2d::star(0, 0, k + 4, 38, 16, accents[k]); }
+                        else { gfx2d::star(0, 0, 38, 16, k + 4, accents[k]); }
                     };
                 };
             }

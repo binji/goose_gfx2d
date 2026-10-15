@@ -60,7 +60,7 @@ fn main() {
         gfx2d::clip_circle(64, 64, 40) { gfx2d::clip_rect(64, 0, 64, 128) { everything(); }; };
     }, PI * 800, 3);
     var star = gfx2d::Path {};
-    gfx2d::star(star, 64, 64, 5, 50, 20);
+    gfx2d::star(star, 64, 64, 50, 20, 5);
     let star_area = 5 * 50 * 20 * sin(PI / 5);
     check_area("clip_path", area() { gfx2d::clip_path(star) { everything(); }; }, star_area, 50);
     check_area("clip_path in a clip", area() {
@@ -176,7 +176,7 @@ fn main() {
     // say.
     let msaa_area = block {
         gfx2d::begin(target, gfx2d::BLACK, 4);
-        gfx2d::star(64, 64, 5, 50, 20, white);
+        gfx2d::star(64, 64, 50, 20, 5, white);
         gfx2d::end();
         px = gfx::read_pixels(target);
         var sum = 0.0;

@@ -162,7 +162,7 @@ fn regular_polygon(p: Path&, cx: f64, cy: f64, r: f64, n: i64, angle: f64 = -PI 
     p.close();
 }
 // n points at radius `outer`, the corners between them at `inner`.
-fn star(p: Path&, cx: f64, cy: f64, n: i64, outer: f64, inner: f64, angle: f64 = -PI / 2) {
+fn star(p: Path&, cx: f64, cy: f64, outer: f64, inner: f64, n: i64, angle: f64 = -PI / 2) {
     for i in 2 * n {
         let a = angle + PI * i / n;
         let r = if i % 2 == 0 { outer } else { inner };

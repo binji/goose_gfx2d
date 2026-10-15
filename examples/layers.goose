@@ -51,7 +51,7 @@ fn main() {
             gfx2d::clip_rounded_rect(30, 30, 140, 120, 24) { stripes(100, 90); };
             gfx2d::clip_circle(270, 90, 60) { stripes(270, 90); };
             var star = gfx2d::Path {};
-            gfx2d::star(star, 0, 0, 5, 70, 30, t * 0.5);
+            gfx2d::star(star, 0, 0, 70, 30, 5, t * 0.5);
             gfx2d::translate(440, 90) { gfx2d::clip_path(star) { stripes(0, 0); }; };
 
             // A card: a drop shadow from a layer, its content clipped to it.

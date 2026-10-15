@@ -134,7 +134,7 @@ struct Paint { color, gradient: Gradient, image: Image, image_mode, opacity, ble
 | `transform(path, m)`, `warp(path) { q => … }`, `bounds(path)`, `contains(path, p, rule)` | an affine transform; any function of every point (for animating a shape) |
 | `fill(path, c, rule = NONZERO)` | `NONZERO` or `EVEN_ODD`: holes and self-intersections are handled |
 | `stroke(path, width, c)`, `stroke(path, Stroke { width, join, cap, miter_limit, dash, dash_offset, pixels }, c)` | joins `JOIN_MITER`, `ROUND`, `BEVEL`; up to 8 dash lengths; `pixels`: width in pixels under any transform |
-| `polygon(points, c)`, `triangle`, `quad`, `polyline(points, width, c, cap, join)`, `polygon_outline`, `regular_polygon(…, c)`, `star(…, c)` | shortcuts |
+| `polygon(points, c)`, `triangle`, `quad`, `polyline(points, width, c, cap, join)`, `polygon_outline`, `regular_polygon(cx, cy, r, n, c)`, `star(cx, cy, outer, inner, n, c)` | shortcuts |
 | `tessellate(path, rule, scale, antialias) -> Mesh`, `tessellate_stroke(path, Stroke, scale, once, antialias)`, `draw(mesh, c)` | a path tessellated once, for `scale` pixels a unit, and drawn every frame under the current transform; `once` for a stroke a translucent paint will draw |
 
 ### Text (`text.goose`)
@@ -142,7 +142,7 @@ struct Paint { color, gradient: Gradient, image: Image, image_mode, opacity, ble
 | | |
 |---|---|
 | `text(x, y, s, size, c)`, `text(x, y, s, TextStyle, c)` | UTF-8 text, kerned, in the default font |
-| `struct TextStyle { font, size, align, baseline, line_spacing, letter_spacing, wrap_width, outline }` | `ALIGN_LEFT`, `CENTER`, `RIGHT`; `BASELINE_TOP`, `MIDDLE`, `ALPHABETIC`, `BOTTOM`; `outline > 0` draws the glyphs' outline |
+| `struct TextStyle { font, size, align, baseline, line_spacing, letter_spacing, wrap_width, outline }` | `ALIGN_LEFT`, `CENTER`, `RIGHT` (about or ending at x, or within the wrap box when there is a `wrap_width`); `BASELINE_TOP`, `MIDDLE`, `ALPHABETIC`, `BOTTOM`; `outline > 0` draws the glyphs' outline |
 | `measure_text(s, size or style) -> float2` | width of the widest line, and the lines' height |
 | `load_font(path) -> Font, bool`, `font_from_memory(bytes, index)`, `release(font)` | TrueType or OpenType fonts |
 | `default_font()`, `set_default_font(f)`, `add_fallback(f, other)` | the built-in Inter (Latin), and chains of fonts for other characters |

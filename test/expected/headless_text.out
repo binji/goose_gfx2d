@@ -1,6 +1,7 @@
 ink: true; inside the box: true; most of its width: true
 centered: true
 right-aligned: true
+in the wrap box: centered true, right-aligned true
 alphabetic: the ink ends at y 80 true
 middle: straddles true
 bottom: above true

@@ -232,7 +232,7 @@ Single runs here swung by 2x between them, so compare cases within one run.
     `mouse_local` dividing it out, and `frame`/`draw_into` taking it.
     *Check:* a headless test drawing at scale 2 and reading pixels.
 
-19. **Small inconsistencies.** `star(cx, cy, n, outer, inner, c)` puts `n`
+19. ~~**Small inconsistencies.**~~ Done, both. `star(cx, cy, n, outer, inner, c)` puts `n`
     third while `regular_polygon(cx, cy, r, n, c)` puts it fourth; and
     `ALIGN_CENTER` with a `wrap_width` centers each line on `x` rather than
     within the wrap box, which is not what CSS users expect. *Change:*

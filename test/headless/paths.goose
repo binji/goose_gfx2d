@@ -54,7 +54,7 @@ fn main() {
     check_area("even-odd", area() { gfx2d::fill(holed, white, gfx2d::EVEN_ODD); }, 7500, 30);
     // A fill that is not convex has a fringe half a pixel wide outside it,
     // which adds about an eighth of a pixel per pixel of outline: 350 here.
-    check_area("star", area() { gfx2d::star(64, 64, 5, 50, 20, white); }, 5 * 50 * 20 * sin(PI / 5) + 44, 15);
+    check_area("star", area() { gfx2d::star(64, 64, 50, 20, 5, white); }, 5 * 50 * 20 * sin(PI / 5) + 44, 15);
     check_area("rotated, scaled", area() {
         gfx2d::translate(64, 64) { gfx2d::rotate(0.5) { gfx2d::scale(2) {
             gfx2d::polygon([float2 { -15, -10 }, float2 { 15, -10 }, float2 { 15, 10 }, float2 { -15, 10 }], white);

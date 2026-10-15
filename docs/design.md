@@ -146,7 +146,7 @@ let paint = gfx2d::Paint {
 };
 
 var star: gfx2d::Path = [];
-star.star(float2 { 150, 100 }, 5, 90, 40);   // path builders are functions over the array
+gfx2d::star(star, 150, 100, 90, 40, 5);     // path builders are functions over the array
 
 gfx2d::clip_rounded_rect(0, 0, 300, 200, 24) {
     gfx2d::fill(star, paint);
@@ -555,7 +555,9 @@ width, which avoids the flicker that sub-pixel strokes cause.
   outline }`. Text is decoded as UTF-8 (an invalid byte is U+FFFD on its
   own) and kerned through stb_truetype. Lines break at newlines and, with
   a wrap width, at the last space that fits. A word wider than the wrap
-  width gets a line of its own. What the font answers is kept on the
+  width gets a line of its own. `ALIGN_CENTER` and `ALIGN_RIGHT` place
+  each line about or ending at x, or, with a wrap width, within the box
+  from x to x + wrap_width, as CSS does. What the font answers is kept on the
   Goose side, so a line is laid out without calling into C: the glyph a
   character resolves to (through the fallbacks) and the kerning of a pair
   in two hash tables, and a glyph's advance in its atlas slot, which is

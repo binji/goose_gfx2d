@@ -1511,8 +1511,8 @@ fn regular_polygon(cx: f64, cy: f64, r: f64, n: i64, c, angle: f64 = -PI / 2) {
     fill(p, c);
 }
 // n points at radius `outer`, the corners between them at `inner`.
-fn star(cx: f64, cy: f64, n: i64, outer: f64, inner: f64, c, angle: f64 = -PI / 2) {
+fn star(cx: f64, cy: f64, outer: f64, inner: f64, n: i64, c, angle: f64 = -PI / 2) {
     var p = Path {};
-    p.star(cx, cy, n, outer, inner, angle);
+    p.star(cx, cy, outer, inner, n, angle);
     fill(p, c);
 }

@@ -389,7 +389,8 @@ let BASELINE_BOTTOM = 3;        // the bottom of the last line
 struct TextStyle {
     font: Font = Font { 0 },        // none: default_font()
     size: f64 = 16.0,               // the em, in pixels
-    align: i32 = 0,                 // ALIGN_LEFT: lines from x; CENTER about it; RIGHT to it
+    align: i32 = 0,                 // ALIGN_LEFT: lines from x; CENTER about it; RIGHT to it; with a
+                                    // wrap_width, within the box from x to x + wrap_width
     baseline: i32 = 0,              // BASELINE_TOP
     line_spacing: f64 = 1.0,        // times the font's own line height
     letter_spacing: f64 = 0.0,      // pixels added after each character
@@ -657,7 +658,9 @@ fn text(x: f64, y: f64, s: const u8[:], style: TextStyle, c) {
     for l in laid_lines {
         var left = x;
         if style.align != ALIGN_LEFT {
-            left = if style.align == ALIGN_CENTER { x - l.width * 0.5 } else { x - l.width };
+            // About x, or to it; within the wrap box when there is one.
+            let right = if style.wrap_width > 0.0 { x + style.wrap_width } else { x };
+            left = if style.align == ALIGN_CENTER { (x + right - l.width) * 0.5 } else { right - l.width };
         }
         var line_y = baseline;
         if plain { line_y = (round(line_y * m.a + m.ty) - m.ty) / m.a; }
