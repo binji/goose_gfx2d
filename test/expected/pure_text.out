@@ -18,3 +18,5 @@ missing everywhere: .notdef of the first, true
 no file: false 0
 not a font: 0, count 0
 released: false, fallback cleared true
+atlas full: true after more than 50 glyphs true; A kept true; the one that did not fit not placed true, nor one after it true
+next frame: starts over true, the missing glyph placed true, and the later one true

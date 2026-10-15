@@ -756,8 +756,10 @@ flicker that sub-pixel strokes cause.
     glyph, where `stbtt_GetGlyphSDF`, which measures every pixel against
     every edge, took about 2 ms, with the same geometry and values.
   * `text.goose` packs the glyphs into a shelf-packed R8 atlas, 1024 px
-    wide and growing taller to 4096 px. The atlas starts over if it
-    fills, and only changed rows are uploaded.
+    wide and growing taller to 4096 px. If it fills, text needing new
+    glyphs is missing for the rest of that frame, and the atlas starts
+    over at the next (the frame's instances name places in the atlas as
+    it is). Only changed rows are uploaded.
   * A glyph is an instance of the shape pipeline (`KIND_GLYPH`). Its
     distance comes from the atlas instead of a formula and becomes
     coverage the same way, so text scales, rotates and takes any paint

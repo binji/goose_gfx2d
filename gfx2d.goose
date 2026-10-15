@@ -278,6 +278,7 @@ fn begin_screen() { begin(gfx::screen()); }
 fn begin_into(target: gfx::Texture, clear: bool, clear_color: Color, samples: i64) {
     if state.drawing { misuse("begin: already drawing; end() the last frame first"); }
     ensure_renderer();
+    begin_atlas_frame();
     let info = gfx::texture_info(target);
     state = FrameState { drawing: true, target: target, width: info.width, height: info.height,
                          transform: IDENTITY, pass: 0, clip: 0, aliased: false };

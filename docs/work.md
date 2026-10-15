@@ -8,7 +8,7 @@ and how to check it. Strike items out as they land.
 
 ## Bugs
 
-1. **The glyph atlas overflow corrupts the frame it happens in.** When
+1. ~~**The glyph atlas overflow corrupts the frame it happens in.**~~ Done. When
    `pack` finds no room, `glyph_slot` (`text.goose`) resets the atlas and
    packs the glyph into the empty one, but instances recorded earlier in
    the frame still name the old places in the atlas, and the texture is

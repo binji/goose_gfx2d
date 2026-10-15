@@ -107,4 +107,36 @@ fn main() {
     gfx2d::release(copy);
     print("released: ", gfx2d::is_valid(copy), ", fallback cleared ",
           gfx2d::font_entries[gfx2d::entry_of(f)].fallback.id == 0);
+
+    // The atlas, kept small: once full, it keeps every glyph where it is
+    // (the frame's instances name those places) and places no more, and at
+    // the next frame it starts over and places what was missing.
+    gfx2d::atlas_max_h = 256;
+    gfx2d::reset_atlas();
+    let a = gfx2d::glyph_slot(f, gfx2d::glyph_index(f, 'A'));
+    var placed = 0;
+    var missing: i32 = 0;
+    var cp: u32 = 0x21;
+    while !gfx2d::atlas_full && cp < 0x180 {
+        let g = gfx2d::glyph_index(f, cp);
+        if g != 0 {
+            if gfx2d::glyph_slot(f, g).w > 0 { placed++; } else { missing = g; }
+        }
+        cp++;
+    }
+    var later: i32 = 0;
+    while later == 0 && cp < 0x180 {
+        later = gfx2d::glyph_index(f, cp);
+        cp++;
+    }
+    let again = gfx2d::glyph_slot(f, gfx2d::glyph_index(f, 'A'));
+    print("atlas full: ", gfx2d::atlas_full, " after more than 50 glyphs ", placed > 50, "; A kept ",
+          again.x == a.x && again.y == a.y && again.w == a.w, "; the one that did not fit not placed ",
+          gfx2d::find_slot(gfx2d::glyph_key(f, missing)) < 0, ", nor one after it ",
+          gfx2d::glyph_slot(f, later).w == 0 && gfx2d::find_slot(gfx2d::glyph_key(f, later)) < 0);
+    gfx2d::begin_atlas_frame();
+    print("next frame: starts over ", gfx2d::atlas_h == 0 && !gfx2d::atlas_full, ", the missing glyph placed ",
+          gfx2d::glyph_slot(f, missing).w > 0, ", and the later one ", gfx2d::glyph_slot(f, later).w > 0);
+    gfx2d::atlas_max_h = 4096;
+    gfx2d::reset_atlas();
 }

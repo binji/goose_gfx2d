@@ -164,7 +164,8 @@ let GLYPH_PAD = 6;
 let GLYPH_ON_EDGE: u8 = 128;
 let GLYPH_DIST_SCALE: f32 = 128.0 / 6.0;     // atlas value per pixel of distance
 let ATLAS_W = 1024;
-let ATLAS_MAX_H = 4096;
+// How tall the atlas may grow; a variable so a test can fill it.
+var atlas_max_h = 4096;
 
 // A glyph of a font in the atlas: where, and where its bitmap goes from
 // the pen at BASE_SIZE. w == 0: nothing to draw (a space).
@@ -184,6 +185,11 @@ var atlas_texture = gfx::Texture { 0 };
 var atlas_texture_h = 0;
 var atlas_opened: i64 = -1;
 var sdf_scratch: u8[>..<] = [];
+// Set when a glyph found no room: no more are placed this frame (instances
+// drawn so far name places in the atlas as it is, so it cannot start over
+// until they are drawn), and it starts over at the next begin().
+var atlas_full = false;
+var warned_full = false;
 
 fn glyph_key(f: Font, glyph: i32) -> u64 { ((f.id as u64) << 32) | (glyph as u32 as u64) + 1 }
 
@@ -234,35 +240,49 @@ fn reset_atlas() {
     shelf_h = 0;
     atlas_dirty_lo = 0;
     atlas_dirty_hi = 0;
+    atlas_full = false;
+}
+
+// At a frame's start (gfx2d.goose's begin): an atlas that filled last
+// frame starts over, now that what named its glyphs has been drawn.
+fn begin_atlas_frame() {
+    if atlas_full { reset_atlas(); }
 }
 
 // Room for a w x h glyph, on the current shelf or a new one, the atlas
 // grown taller if need be: its top left, or false if the atlas is full.
+// Full, it stays as it is (its shelves included) until it starts over.
 fn pack(w: i64, h: i64) -> i64, i64, bool {
-    if shelf_x + w + 1 > ATLAS_W {
-        shelf_y += shelf_h + 1;
-        shelf_x = 0;
-        shelf_h = 0;
+    var x = shelf_x;
+    var y = shelf_y;
+    var sh = shelf_h;
+    if x + w + 1 > ATLAS_W {
+        y += sh + 1;
+        x = 0;
+        sh = 0;
     }
-    if shelf_y + h + 1 > atlas_h {
-        let need = shelf_y + h + 1;
+    if y + h + 1 > atlas_h {
+        let need = y + h + 1;
         var grown = max(atlas_h, 256);
         while grown < need { grown *= 2; }
-        if grown > ATLAS_MAX_H { return 0, 0, false; }
+        if grown > atlas_max_h { return 0, 0, false; }
         atlas_pixels.resize(ATLAS_W * grown, 0);
         atlas_h = grown;
     }
-    let x = shelf_x;
-    shelf_x += w + 1;
-    shelf_h = max(shelf_h, h);
-    return x, shelf_y, true;
+    shelf_x = x + w + 1;
+    shelf_y = y;
+    shelf_h = max(sh, h);
+    return x, y, true;
 }
 
-// Glyph `glyph` of font f in the atlas, rasterized the first time.
+// Glyph `glyph` of font f in the atlas, rasterized the first time; with
+// nothing to draw (w 0) if the atlas is full, until it starts over at the
+// next frame.
 fn glyph_slot(f: Font, glyph: i32) -> GlyphSlot {
     let key = glyph_key(f, glyph);
     let found = find_slot(key);
     if found >= 0 { return glyph_slots[found]; }
+    if atlas_full { return GlyphSlot { key, 0, 0, 0, 0, 0.0, 0.0 }; }
     let m = metrics_of(f);
     let scale = BASE_SIZE / m.units_per_em;
     var info = GlyphBitmap { 0, 0, 0, 0 };
@@ -274,11 +294,18 @@ fn glyph_slot(f: Font, glyph: i32) -> GlyphSlot {
     }
     var s = GlyphSlot { key, 0, 0, 0, 0, info.xoff, info.yoff };
     if ok && info.w > 0 && info.h > 0 {
-        var x, y, room = pack(info.w, info.h);
+        let x, y, room = pack(info.w, info.h);
         if !room {
-            // Full: start again with only what is drawn from now on.
-            reset_atlas();
-            x, y, room = pack(info.w, info.h);
+            // Full. Not remembered, so it is placed at the next frame, once
+            // the atlas has started over; unless it would not fit even
+            // then, which is remembered as nothing to draw.
+            if glyph_count == 0 { insert_slot(s); return s; }
+            atlas_full = true;
+            if !warned_full {
+                write_stderr("gfx2d: the glyph atlas is full; text needing new glyphs is missing this frame, and the atlas starts over next frame\n");
+                warned_full = true;
+            }
+            return s;
         }
         if room {
             for row in info.h {

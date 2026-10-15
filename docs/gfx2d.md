@@ -225,7 +225,9 @@ Goose program ──► gfx2d (Goose: shapes, paints, paths, text layout, passes
 * **Text:**
   * Glyphs are rasterized once at a 48 px em into a shelf-packed R8 atlas,
     1024 px wide and up to 4096 tall, of which only changed rows are
-    uploaded.
+    uploaded. If it fills, text needing new glyphs is missing for the rest
+    of that frame (a warning says so), and the atlas starts over at the
+    next.
   * A glyph is drawn as a shape instance whose distance comes from the
     atlas.
   * The built-in font is a 48 KB Latin subset of Inter 4.1 (OFL 1.1), in
