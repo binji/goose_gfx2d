@@ -121,7 +121,7 @@ let CLIP_MASK: u32 = 3;
 let CLIP_SIZE = 64;
 
 // The shaders' uniform blocks, rounded to 16 bytes as std140 does.
-struct FrameUniforms { view: float4, base: u32, pad 12 }
+struct FrameUniforms { view: float4, base: u32, mode: u32, pad 8 }    // mode: a SHAPE_* drawing
 struct BlendUniforms { blend: u32, clip: u32, pad 8 }     // clip: a mesh batch's
 struct CompositeUniforms { tint: float4, offset: float2, size: float2, opacity: f32, blend: u32, shadow: u32,
                            clip: u32, scale: f32 = 1.0, pad 12 }    // size: the layer's, in target pixels; scale: target pixels a texel of it
@@ -138,6 +138,7 @@ let CAP_SQUARE = 2;     // half the width past it
 struct Renderer {
     opened: i64 = -1,                   // the gfx::open_count() these were made under
     pipelines: gfx::Pipeline[4] = [gfx::Pipeline { 0 }; 4],     // shapes, by BLEND_*
+    solid_pipelines: gfx::Pipeline[4] = [gfx::Pipeline { 0 }; 4],   // their interiors
     mesh_pipelines: gfx::Pipeline[4] = [gfx::Pipeline { 0 }; 4],
     vertices: gfx::Buffer = gfx::Buffer { 0 },
     vertex_bytes: i64 = 0,
@@ -214,6 +215,23 @@ fn sweep_pool() {
 let BATCH_SHAPES = 0;
 let BATCH_MESH = 1;
 let BATCH_COMPOSITE = 2;
+// A large plain rectangle drawn as two pieces that meet without a seam: the
+// ring between its edge and where it is fully covered, by the shape shader,
+// and that interior, by a shader that only writes the color. Every pixel of
+// the shape shader fetches the instance's many values from the vertex
+// shader, which made a full-screen fill cost about four times a plain one.
+let BATCH_RINGS = 3;
+let BATCH_SOLIDS = 4;
+
+// shape.vert's drawings of an instance, by FrameUniforms.mode.
+let SHAPE_QUAD: u32 = 0;        // its quad: six vertices
+let SHAPE_RING: u32 = 1;        // the quad less the interior: 24
+let SHAPE_INTERIOR: u32 = 2;    // the interior: six
+
+// The least interior, in pixels each way, worth drawing apart: below it the
+// ring's extra vertices and batches cost more than the pixels save. A var,
+// so test/headless/interiors.goose can turn the split off to compare.
+var solid_min_pixels: f32 = 48.0;
 struct Batch { kind: i64, first: i64, count: i64, blend: i32, texture: gfx::Texture, sampler: i64,
                mask: gfx::Texture, clip: u32 }    // clip: a mesh batch's; shapes carry theirs
 
@@ -485,6 +503,7 @@ fn ensure_renderer() {
     if renderer.opened == gfx::open_count() { return; }
     let vs = embed_shader("src/shaders/shape.vert");
     let fs = embed_shader("src/shaders/shape.frag");
+    let solid_fs = embed_shader("src/shaders/solid.frag");
     renderer = Renderer { opened: gfx::open_count() };
     let modes: i32[4] = [gfx::BLEND_PREMULTIPLIED, gfx::BLEND_ADD, gfx::BLEND_MULTIPLY,
                          gfx::BLEND_NONE];
@@ -492,6 +511,7 @@ fn ensure_renderer() {
     let mesh_fs = embed_shader("src/shaders/mesh.frag");
     for mode, i in modes {
         renderer.pipelines[i] = gfx::pipeline(vs, fs, gfx::PipelineDesc { blend: mode });
+        renderer.solid_pipelines[i] = gfx::pipeline(vs, solid_fs, gfx::PipelineDesc { blend: mode });
         var mesh = gfx::PipelineDesc { blend: mode };
         mesh.formats[2] = gfx::VERTEX_UBYTE4_NORM;      // the color's bytes
         renderer.mesh_pipelines[i] = gfx::pipeline(mesh_vs, mesh_fs, mesh);
@@ -612,7 +632,7 @@ fn bind_geometry() {
     }
 }
 fn push_frame(u: FrameUniforms) {
-    if !bound.has_frame || bound.frame.base != u.base || bound.frame.view != u.view {
+    if !bound.has_frame || bound.frame.base != u.base || bound.frame.mode != u.mode || bound.frame.view != u.view {
         gfx::uniforms(gfx::VERTEX, 0, u);
         bound.frame = u;
         bound.has_frame = true;
@@ -689,10 +709,19 @@ fn flush_batches() {
                 }
                 continue;
             }
+            if b.kind == BATCH_SOLIDS {
+                bind_pipeline(renderer.solid_pipelines[b.blend]);
+                bind_storage(gfx::VERTEX, 0, renderer.instances);
+                push_frame(FrameUniforms { view: view, base: b.first as u32, mode: SHAPE_INTERIOR });
+                push_blend(BlendUniforms { blend: b.blend as u32, clip: 0 });
+                gfx::draw(b.count * 6);
+                continue;
+            }
             let image = if b.texture.id == 0 { renderer.white } else { b.texture };
             bind_fragment_texture(0, ramps, linear);
             bind_fragment_texture(1, image, renderer.samplers[b.sampler]);
-            if b.kind == BATCH_SHAPES {
+            let shapes = b.kind == BATCH_SHAPES || b.kind == BATCH_RINGS;
+            if shapes {
                 bind_pipeline(renderer.pipelines[b.blend]);
                 bind_storage(gfx::VERTEX, 0, renderer.instances);
                 bind_fragment_texture(2, glyphs, linear);
@@ -706,9 +735,11 @@ fn flush_batches() {
             bind_storage(gfx::FRAGMENT, 1, renderer.clips);
             // A mesh batch's shader has no use for the base: 0, so that
             // mesh batches in a row share one push.
-            push_frame(FrameUniforms { view: view, base: if b.kind == BATCH_SHAPES { b.first as u32 } else { 0 } });
+            push_frame(FrameUniforms { view: view, base: if shapes { b.first as u32 } else { 0 },
+                                       mode: if b.kind == BATCH_RINGS { SHAPE_RING } else { SHAPE_QUAD } });
             push_blend(BlendUniforms { blend: b.blend as u32, clip: b.clip });
             if b.kind == BATCH_SHAPES { gfx::draw(b.count * 6); }
+            else if b.kind == BATCH_RINGS { gfx::draw(b.count * 24); }
             else { gfx::draw_indexed(b.count, 1, b.first, 0, 0); }
         }
         gfx::end_pass();
@@ -909,7 +940,30 @@ fn add(kind: u32, shape_flags: u32, local: Affine, geom: float4, radii: float4, 
                               kind: kind, flags: flags, geom: geom, radii: radii, color: k.color,
                               lm: float4 { local.a, local.b, local.c, local.d },
                               lt: float2 { local.tx, local.ty }, paint: k.paint, clip: state.clip });
-    batch(BATCH_SHAPES, instances.len - 1, 1, k);
+    if has_interior(kind, flags, geom, radii, k, m) {
+        batch(BATCH_SOLIDS, instances.len - 1, 1, k);
+        batch(BATCH_RINGS, instances.len - 1, 1, k);
+    } else {
+        batch(BATCH_SHAPES, instances.len - 1, 1, k);
+    }
+}
+
+// Whether a shape is drawn as a ring and an interior: a rectangle with the
+// color alone, unclipped, not stroked, antialiased and not turned, whose
+// interior (where shape.frag's coverage is 1: a pixel, shape.vert's v_px, or
+// more inside its corners' reach) is solid_min_pixels or more each way.
+// shape.vert finds the interior again, the same way, for both pieces. The
+// ring's triangles interpolate the local position a little differently from
+// the whole quad, which only an aliased shape's pixel exactly on its edge
+// could tell.
+fn has_interior(kind: u32, flags: u32, geom: float4, radii: float4, k: PaintKey, m: Affine) -> bool {
+    if kind != KIND_RECT || (flags & (FLAG_STROKE | FLAG_ALIASED)) != 0 || k.paint != 0 || state.clip != 0 { return false; }
+    if m.b != 0.0 || m.c != 0.0 || m.a == 0.0 || m.d == 0.0 { return false; }
+    let sx = abs(m.a);
+    let sy = abs(m.d);
+    let px = 0.5 * (sx + sy) / (sx * sy);
+    let r = max(max(radii.x, radii.y), max(radii.z, radii.w));
+    (geom.x - r - px) * sx * 2.0 >= solid_min_pixels && (geom.y - r - px) * sy * 2.0 >= solid_min_pixels
 }
 
 // The pixels an instance's quad covers (as shape.vert makes it), into the
