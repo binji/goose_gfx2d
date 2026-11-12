@@ -43,7 +43,7 @@ const uint ring_inner[24] = uint[24](0u, 0u, 1u, 0u, 1u, 1u,  0u, 0u, 1u, 0u, 1u
 
 void main() {
     uint per = mode == SHAPE_RING ? 24u : 6u;
-    uint vertex = uint(gl_VertexIndex) % per;
+    uint vertex_index = uint(gl_VertexIndex) % per;
     Instance s = inst[base + uint(gl_VertexIndex) / per];
     vec2 extent;
     if (s.kind == KIND_RECT || s.kind == KIND_ELLIPSE || s.kind == KIND_GLYPH) {
@@ -71,11 +71,11 @@ void main() {
     vec2 inner = max(s.geom.xy - r - px, vec2(0.0));
     vec2 p;
     if (mode == SHAPE_RING) {
-        p = around[ring_corner[vertex]] * (ring_inner[vertex] != 0u ? inner : extent);
+        p = around[ring_corner[vertex_index]] * (ring_inner[vertex_index] != 0u ? inner : extent);
     } else if (mode == SHAPE_INTERIOR) {
-        p = corners[vertex] * inner;
+        p = corners[vertex_index] * inner;
     } else {
-        p = corners[vertex] * extent;
+        p = corners[vertex_index] * extent;
     }
     vec2 pixel = s.m.xy * p.x + s.m.zw * p.y + s.t;
     gl_Position = vec4(pixel.x / view.x * 2.0 - 1.0, 1.0 - pixel.y / view.y * 2.0, 0.0, 1.0);
